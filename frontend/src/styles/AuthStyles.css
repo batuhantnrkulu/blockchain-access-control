@@ -1,0 +1,32 @@
+.auth-container {
+  background: linear-gradient(145deg, #2196f3 30%, #21cbf3 90%);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.auth-paper {
+  padding: 2rem;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  transition: transform 0.3s ease;
+}
+
+.auth-paper:hover {
+  transform: translateY(-5px);
+}
+
+.auth-form {
+  margin-top: 1.5rem;
+}
+
+.auth-link {
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.auth-link:hover {
+  color: #1565c0 !important;
+}

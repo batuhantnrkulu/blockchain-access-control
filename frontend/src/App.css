@@ -1,0 +1,42 @@
+/* Container style for authentication pages */
+.auth-container {
+  max-width: 500px;
+  margin: 50px auto;
+  background: #fff;
+  padding: 30px;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  animation: fadeIn 0.8s ease-in-out;
+}
+
+.auth-nav {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.btn-link {
+  border: none;
+  background: none;
+  color: #007bff;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+/* Navbar styling for Dashboard */
+.navbar {
+  background-color: #fff;
+  padding: 15px 30px;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  margin-bottom: 30px;
+}
+
+.navbar-brand {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #333;
+}
