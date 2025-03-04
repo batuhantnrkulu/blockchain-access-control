@@ -26,9 +26,19 @@ A full-stack application with Spring Boot (backend) and React (frontend).
    ```
 
 navigate to the frontend project
-```bash
 cd frontend
 
 Install dependencies
-```bash
 npm install
+
+Start the development server
+npm start
+
+blockchain-access-control/
+├── backend/ # Spring Boot application
+│ ├── src/
+│ └── pom.xml
+├── frontend/ # React application
+│ ├── src/
+│ └── package.json
+└── README.md
