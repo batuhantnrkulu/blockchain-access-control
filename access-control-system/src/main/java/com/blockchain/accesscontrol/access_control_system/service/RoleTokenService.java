@@ -1,7 +1,9 @@
 package com.blockchain.accesscontrol.access_control_system.service;
 
+import java.math.BigInteger;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -14,6 +16,7 @@ import com.blockchain.accesscontrol.access_control_system.config.TransactionMana
 import com.blockchain.accesscontrol.access_control_system.contracts.RoleToken;
 import com.blockchain.accesscontrol.access_control_system.dto.requests.PeerRegistrationRequest;
 import com.blockchain.accesscontrol.access_control_system.dto.responses.MemberDTO;
+import com.blockchain.accesscontrol.access_control_system.enums.NotificationType;
 import com.blockchain.accesscontrol.access_control_system.enums.Role;
 import com.blockchain.accesscontrol.access_control_system.enums.Status;
 import com.blockchain.accesscontrol.access_control_system.mapper.MemberMapper;
@@ -38,6 +41,7 @@ public class RoleTokenService extends BaseContractService<RoleToken>
     private final ValidatorListRepository validatorListRepository;
     private final EncryptionUtil encryptionUtil;
     private final PasswordEncoder passwordEncoder;
+    private final NotificationService notificationService;
     
     // Inject the WebSocket messaging template
     private final SimpMessagingTemplate messagingTemplate;
@@ -46,7 +50,7 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 			@Value("${contract.roleTokenAddress}") String contractAddress, MemberMapper memberMapper,
 			PeerRepository peerRepository, ValidatorListRepository validatorListRepository,
 			UnjoinedPeerRepository unjoinedPeerRepository, EncryptionUtil encryptionUtil, PasswordEncoder passwordEncoder,
-			SimpMessagingTemplate messagingTemplate) 
+			SimpMessagingTemplate messagingTemplate, NotificationService notificationService) 
 	{
 		super(web3j, transactionManagerFactory, contractAddress);
 		this.memberMapper = memberMapper;
@@ -56,6 +60,7 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 		this.encryptionUtil = encryptionUtil;
 		this.passwordEncoder = passwordEncoder;
 		this.messagingTemplate = messagingTemplate;
+		this.notificationService = notificationService;
 	}
 	
 	@Transactional
@@ -76,20 +81,18 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 
     private int calculateRequiredValidators(long primaryHeadCount) 
     {
-        if (primaryHeadCount >= 3 && primaryHeadCount < 5) 
-        {
-            return 1;
-        } 
-        else if (primaryHeadCount >= 5 && primaryHeadCount <= 10) 
-        {
-            return 3;
-        } 
-        else if (primaryHeadCount > 10) 
-        {
-            return 7;
+    	if (primaryHeadCount < 3) 
+    	{
+            return 0; // No validators if fewer than 3 primary heads
         }
+
+        double A = 12.0; // Scaling factor for validator growth
+        double K = 2.0;  // Small constant to prevent log(0)
         
-        return 0;
+        // change of base rule: Math.log(primaryHeadCount + K) / Math.log(2))
+        int validators = (int)Math.ceil(A * (Math.log(primaryHeadCount + K) / Math.log(2)) / Math.sqrt(primaryHeadCount));
+
+        return Math.min(validators, (int)primaryHeadCount); // Ensure validators ≤ primary heads
     }
 
     private void assignDirectly(PeerRegistrationRequest peerRegistrationRequest) 
@@ -160,19 +163,25 @@ public class RoleTokenService extends BaseContractService<RoleToken>
             return;
         }
 
-        UnjoinedPeer unjoinedPeer = unjoinedPeerRepository.findByBcAddress(request.getBlockchainAddress())
-                .orElseGet(() -> {
-                	UnjoinedPeer newPeer = new UnjoinedPeer();
-                    newPeer.setUsername(request.getUsername());
-                    newPeer.setPassword(request.getPassword());
-                    newPeer.setIpAddress(request.getIpAddress());
-                    newPeer.setBcAddress(request.getBlockchainAddress()); 
-                    newPeer.setUsagePurpose(request.getUsagePurpose());
-                    newPeer.setGroup(request.getGroup());
-                    newPeer.setIsWebUser(request.getIsWebUser());
-
-                    return unjoinedPeerRepository.save(newPeer);
-                });
+        // Check if the peer has already requested to join
+        Optional<UnjoinedPeer> existingUnjoinedPeer = unjoinedPeerRepository.findByBcAddress(request.getBlockchainAddress());
+        
+        if (existingUnjoinedPeer.isPresent()) 
+        {
+            System.out.println("Peer already requested to join. Cannot assign validators again.");
+            return;
+        }
+        
+        UnjoinedPeer unjoinedPeer = new UnjoinedPeer();
+        unjoinedPeer.setUsername(request.getUsername());
+        unjoinedPeer.setPassword(request.getPassword());
+        unjoinedPeer.setIpAddress(request.getIpAddress());
+        unjoinedPeer.setBcAddress(request.getBlockchainAddress()); 
+        unjoinedPeer.setUsagePurpose(request.getUsagePurpose());
+        unjoinedPeer.setGroup(request.getGroup());
+        unjoinedPeer.setIsWebUser(request.getIsWebUser());
+        unjoinedPeer.setValidatorCount(count);
+        unjoinedPeer = unjoinedPeerRepository.save(unjoinedPeer);
 
         List<Peer> selectedValidators = ConsensusUtil.selectWeightedRandom(primaryHeads, count);
 
@@ -194,6 +203,9 @@ public class RoleTokenService extends BaseContractService<RoleToken>
             // Prepare notification message.
             String message = "Validation request for new peer: " + unjoinedPeer.getUsername();
 
+            // Create and persist the notification for the validator.
+            notificationService.createNotification(validator, message, NotificationType.VALIDATION);
+            
             // Send the notification over a dedicated destination.
             // For example, each validator's client can subscribe to "/topic/validator/{blockchainAddress}"
             String destination = "/topic/validator/" + validator.getBcAddress();
@@ -204,6 +216,91 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         }
 
         System.out.println("Assigned " + selectedValidators.size() + " validators.");
+    }
+    
+    /**
+     * Deducts the specified penalty amount from the given member both on-chain via the contract,
+     * and off-chain by updating the peer record in the database.
+     * Also sends a notification alerting the member of the penalty.
+     *
+     * @param memberAddress The blockchain address of the member.
+     * @param penaltyAmount The penalty amount to deduct.
+     */
+    @Transactional
+    public Long penalizeMemberAndUpdate(String memberAddress, long penaltyAmount) 
+    {
+    	RoleToken contract = loadContract(RoleToken.class);
+    	
+        try 
+        {
+            BigInteger penalty = BigInteger.valueOf(penaltyAmount);
+            
+            // Call contract function to penalize the member.
+            TransactionReceipt receipt = contract.penalizeMember(memberAddress, penalty).send();
+            System.out.println("Penalty Transaction Receipt: " + receipt.getTransactionHash());
+
+            // Update the member's balance in the local database.
+            Optional<Peer> peerOpt = peerRepository.findByBcAddress(memberAddress);
+            
+            if (peerOpt.isPresent()) 
+            {
+            	Peer peer = peerOpt.get();
+                long currentBalance = peer.getErc20TokenAmount();
+                long newBalance = currentBalance - penaltyAmount;
+                peer.setErc20TokenAmount(newBalance);
+                peerRepository.save(peer);
+                
+                return newBalance;
+            }
+        } 
+        catch (Exception e) 
+        {
+            e.printStackTrace();
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Rewards the member with the specified amount on-chain and off-chain.
+     *
+     * @param memberAddress The blockchain address of the member.
+     * @param rewardAmount  The reward amount to add.
+     */
+    @Transactional
+    public Long rewardMemberAndUpdate(String memberAddress, long rewardAmount) 
+    {
+    	RoleToken contract = loadContract(RoleToken.class);
+    	
+        try 
+        {
+            BigInteger reward = BigInteger.valueOf(rewardAmount);
+            
+            // Call contract function to add tokens to the member.
+            TransactionReceipt receipt = contract.rewardMember(memberAddress, reward).send();
+            System.out.println("Reward Transaction Receipt: " + receipt.getTransactionHash());
+
+            // Update the member's token balance in the database.
+            Optional<Peer> peerOpt = peerRepository.findByBcAddress(memberAddress);
+            
+            if (peerOpt.isPresent()) 
+            {
+            	Peer peer = peerOpt.get();
+            	
+                long currentBalance = peer.getErc20TokenAmount();
+                long newBalance = currentBalance + rewardAmount;
+                peer.setErc20TokenAmount(newBalance);
+                peerRepository.save(peer);
+                
+                return newBalance;
+            }
+        } 
+        catch (Exception e) 
+        {
+            e.printStackTrace();
+        }
+        
+        return null;
     }
 	
 	public MemberDTO getMember(String memberAddress) 

@@ -46,4 +46,7 @@ public class UnjoinedPeer
 	
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt = LocalDateTime.now();
+	
+	@Column(name = "validator_count", nullable = false)
+    private int validatorCount = 0; // Tracks assigned validators
 }

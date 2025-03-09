@@ -33,6 +33,9 @@ public class BehaviorHistory
 
 	@Column(name = "token_amount")
 	private Long tokenAmount;
+	
+	@Column(name = "token_amount_change")
+    private Long tokenAmountChange; // Tracks the change in token balance
 
 	@Column(name = "reason")
 	private String reason;
