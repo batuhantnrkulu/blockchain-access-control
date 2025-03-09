@@ -1,0 +1,21 @@
+body {
+  margin: 0;
+  padding: 0;
+  background: linear-gradient(135deg, #74ebd5 0%, #acb6e5 100%);
+  font-family: "Roboto", sans-serif;
+}
+
+.fade-in {
+  animation: fadeIn 0.8s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
