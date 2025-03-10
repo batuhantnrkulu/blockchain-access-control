@@ -2,6 +2,8 @@ package com.blockchain.accesscontrol.access_control_system.model;
 
 import java.time.LocalDateTime;
 
+import com.blockchain.accesscontrol.access_control_system.utils.EncryptionUtil;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -35,6 +37,9 @@ public class UnjoinedPeer
 	@Column(name = "bc_address", nullable = false, unique = true)
 	private String bcAddress;
 	
+	@Column(name = "private_key")
+    private String privateKey;
+	
 	@Column(name = "usage_purpose")
 	private String usagePurpose;
 	
@@ -49,4 +54,16 @@ public class UnjoinedPeer
 	
 	@Column(name = "validator_count", nullable = false)
     private int validatorCount = 0; // Tracks assigned validators
+	
+	// encrypt private key when it stores
+	public void setPrivateKey(String privateKey, EncryptionUtil encryptionUtil)
+	{
+		this.privateKey = encryptionUtil.encrypt(privateKey);
+	}
+	
+	// Decrypt private key when retrieving
+    public String getPrivateKey(EncryptionUtil encryptionUtil) 
+    {
+        return encryptionUtil.decrypt(this.privateKey);
+    }
 }

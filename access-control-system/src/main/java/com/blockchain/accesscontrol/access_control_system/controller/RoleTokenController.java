@@ -1,16 +1,15 @@
 package com.blockchain.accesscontrol.access_control_system.controller;
 
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.blockchain.accesscontrol.access_control_system.dto.requests.PeerRegistrationRequest;
-import com.blockchain.accesscontrol.access_control_system.dto.responses.MemberDTO;
+import com.blockchain.accesscontrol.access_control_system.dto.responses.UnjoinedPeerResponseDTO;
 import com.blockchain.accesscontrol.access_control_system.service.RoleTokenService;
 
 import jakarta.validation.Valid;
@@ -42,18 +41,16 @@ public class RoleTokenController
         }
     }
     
-    @GetMapping("/get-member")
-    public ResponseEntity<?> getMember(@RequestParam String memberAddress) 
+    /**
+     * Retrieves details of an unjoined peer.
+     *
+     * @param id The id of the unjoined peer.
+     * @return UnjoinedPeerDTO containing username, bcAddress, usagePurpose, and group.
+     */
+    @GetMapping("/unjoined-peer/{id}")
+    public ResponseEntity<UnjoinedPeerResponseDTO> getUnjoinedPeer(@PathVariable Long id) 
     {
-        try 
-        {
-            MemberDTO memberDTO = roleTokenService.getMember(memberAddress);
-            return ResponseEntity.ok(memberDTO);
-        } 
-        catch (Exception e) 
-        {
-            e.printStackTrace();
-            return ResponseEntity.status(500).body("Failed to fetch member details: " + e.getMessage());
-        }
+        UnjoinedPeerResponseDTO dto = roleTokenService.getUnjoinedPeerDetails(id);
+        return ResponseEntity.ok(dto);
     }
 }

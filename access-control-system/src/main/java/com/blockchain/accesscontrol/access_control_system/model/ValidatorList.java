@@ -38,4 +38,8 @@ public class ValidatorList
     
     @Column(name = "expiry_time", nullable = false)
     private LocalDateTime expiryTime;
+    
+    // New field to indicate that a response was provided.
+    @Column(nullable = false)
+    private Boolean responded = false;
 }

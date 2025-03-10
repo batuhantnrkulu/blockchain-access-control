@@ -16,10 +16,12 @@ import com.blockchain.accesscontrol.access_control_system.config.TransactionMana
 import com.blockchain.accesscontrol.access_control_system.contracts.RoleToken;
 import com.blockchain.accesscontrol.access_control_system.dto.requests.PeerRegistrationRequest;
 import com.blockchain.accesscontrol.access_control_system.dto.responses.MemberDTO;
+import com.blockchain.accesscontrol.access_control_system.dto.responses.UnjoinedPeerResponseDTO;
 import com.blockchain.accesscontrol.access_control_system.enums.NotificationType;
 import com.blockchain.accesscontrol.access_control_system.enums.Role;
 import com.blockchain.accesscontrol.access_control_system.enums.Status;
 import com.blockchain.accesscontrol.access_control_system.mapper.MemberMapper;
+import com.blockchain.accesscontrol.access_control_system.mapper.UnjoinedPeerMapper;
 import com.blockchain.accesscontrol.access_control_system.model.Peer;
 import com.blockchain.accesscontrol.access_control_system.model.UnjoinedPeer;
 import com.blockchain.accesscontrol.access_control_system.model.ValidatorList;
@@ -42,6 +44,7 @@ public class RoleTokenService extends BaseContractService<RoleToken>
     private final EncryptionUtil encryptionUtil;
     private final PasswordEncoder passwordEncoder;
     private final NotificationService notificationService;
+    private final UnjoinedPeerMapper unjoinedPeerMapper;
     
     // Inject the WebSocket messaging template
     private final SimpMessagingTemplate messagingTemplate;
@@ -50,7 +53,7 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 			@Value("${contract.roleTokenAddress}") String contractAddress, MemberMapper memberMapper,
 			PeerRepository peerRepository, ValidatorListRepository validatorListRepository,
 			UnjoinedPeerRepository unjoinedPeerRepository, EncryptionUtil encryptionUtil, PasswordEncoder passwordEncoder,
-			SimpMessagingTemplate messagingTemplate, NotificationService notificationService) 
+			SimpMessagingTemplate messagingTemplate, NotificationService notificationService, UnjoinedPeerMapper unjoinedPeerMapper) 
 	{
 		super(web3j, transactionManagerFactory, contractAddress);
 		this.memberMapper = memberMapper;
@@ -61,6 +64,7 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 		this.passwordEncoder = passwordEncoder;
 		this.messagingTemplate = messagingTemplate;
 		this.notificationService = notificationService;
+		this.unjoinedPeerMapper = unjoinedPeerMapper;
 	}
 	
 	@Transactional
@@ -95,7 +99,7 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         return Math.min(validators, (int)primaryHeadCount); // Ensure validators ≤ primary heads
     }
 
-    private void assignDirectly(PeerRegistrationRequest peerRegistrationRequest) 
+    public void assignDirectly(PeerRegistrationRequest peerRegistrationRequest) 
     {
     	RoleToken contract = loadContract(RoleToken.class);
 		
@@ -176,7 +180,8 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         unjoinedPeer.setUsername(request.getUsername());
         unjoinedPeer.setPassword(request.getPassword());
         unjoinedPeer.setIpAddress(request.getIpAddress());
-        unjoinedPeer.setBcAddress(request.getBlockchainAddress()); 
+        unjoinedPeer.setBcAddress(request.getBlockchainAddress());
+        unjoinedPeer.setPrivateKey(request.getPrivateKey(), encryptionUtil);
         unjoinedPeer.setUsagePurpose(request.getUsagePurpose());
         unjoinedPeer.setGroup(request.getGroup());
         unjoinedPeer.setIsWebUser(request.getIsWebUser());
@@ -201,10 +206,10 @@ public class RoleTokenService extends BaseContractService<RoleToken>
             validatorListRepository.save(validatorEntry);
 
             // Prepare notification message.
-            String message = "Validation request for new peer: " + unjoinedPeer.getUsername();
+            String message = "Validation request for new peer: " + unjoinedPeer.getUsername() + "(" + unjoinedPeer.getId() + ")";
 
             // Create and persist the notification for the validator.
-            notificationService.createNotification(validator, message, NotificationType.VALIDATION);
+            notificationService.createNotification(validator, message, NotificationType.VALIDATION_REQUEST);
             
             // Send the notification over a dedicated destination.
             // For example, each validator's client can subscribe to "/topic/validator/{blockchainAddress}"
@@ -303,16 +308,22 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         return null;
     }
 	
-	public MemberDTO getMember(String memberAddress) 
-	{
-        RoleToken contract = loadContract(RoleToken.class);
-
-        try {
-            RoleToken.Member memberStruct = contract.getMember(memberAddress).send();
-            return memberMapper.toMemberDTO(memberStruct);  // Use MapStruct for mapping
-        } catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException("Failed to fetch member details.", e);
+    /**
+     * Retrieves and converts an UnjoinedPeer entity into a DTO
+     * containing only the relevant fields: username, bcAddress, usagePurpose, and group.
+     *
+     * @param id the id of the unjoined peer.
+     * @return UnjoinedPeerResponseDTO with selected details.
+     */
+    public UnjoinedPeerResponseDTO getUnjoinedPeerDetails(Long id) 
+    {
+        Optional<UnjoinedPeer> optionalPeer = unjoinedPeerRepository.findById(id);
+        
+        if (!optionalPeer.isPresent()) 
+        {
+            throw new RuntimeException("Unjoined Peer with id: " + id + " not found");
         }
+        
+        return unjoinedPeerMapper.toDto(optionalPeer.get());
     }
 }
