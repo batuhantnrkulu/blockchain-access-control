@@ -11,18 +11,21 @@ import {
   Tab,
   Box,
   styled,
+  Button,
+  Divider,
 } from "@mui/material";
 import {
   Notifications as NotificationsIcon,
   AccountCircle,
   Logout,
 } from "@mui/icons-material";
+import { useNavigate } from "react-router-dom";
 import BehaviorHistory from "./BehaviorHistory";
 import AccessControlContracts from "./AccessControlContracts";
 import Resources from "./Resources";
-import "../../styles/Dashboard.css"; // CSS import for custom animations
+import api, { createBasicAuthHeader } from "../../utils/api";
+import "../../styles/Dashboard.css";
 
-// Import SockJS and StompJS for websocket connectivity.
 import SockJS from "sockjs-client";
 import { Client } from "@stomp/stompjs";
 
@@ -39,99 +42,116 @@ const MainContent = styled("main")(({ theme }) => ({
 }));
 
 function Dashboard({ user, onLogout }) {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("behaviorHistory");
-
-  // Notifications state: each notification contains an id, message and a read flag.
-  // For example: { id: 1, message: "New validator request", read: false }
   const [notifications, setNotifications] = useState([]);
-
-  // Anchor states for the profile and notifications menus.
+  const [unreadCount, setUnreadCount] = useState(0);
   const [anchorEl, setAnchorEl] = useState(null);
   const [notifAnchor, setNotifAnchor] = useState(null);
 
-  // Compute unread notifications count.
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  // 🔹 **Fetch Unread Notifications (Only Once on Load)**
+  const fetchUnreadNotifications = async () => {
+    try {
+      const response = await api.get("/api/notifications", {
+        params: { username: user.username, page: 0, size: 5 },
+        headers: {
+          Authorization: createBasicAuthHeader(user.username, user.password),
+        },
+      });
 
-  const handleTabChange = (event, newValue) => {
-    setActiveTab(newValue);
+      const unreadNotifications = response.data.content.filter(
+        (notif) => !notif.read
+      );
+      console.log(response);
+      setNotifications(unreadNotifications);
+      setUnreadCount(unreadNotifications.length);
+    } catch (error) {
+      console.error("Error fetching unread notifications:", error);
+    }
   };
 
-  const handleProfileMenuOpen = (event) => {
-    setAnchorEl(event.currentTarget);
-  };
+  // 🔹 **Fetch Notifications Only When Dashboard Loads**
+  useEffect(() => {
+    if (user) {
+      fetchUnreadNotifications();
+    }
+  }, [user]);
 
-  const handleMenuClose = () => {
-    setAnchorEl(null);
-  };
+  // 🔹 **WebSocket for Live Notifications**
+  useEffect(() => {
+    const socket = new SockJS("http://localhost:8080/ws");
+    const stompClient = new Client({
+      webSocketFactory: () => socket,
+      reconnectDelay: 5000,
+      debug: (str) => console.log(str),
+      onConnect: () => {
+        const subscriptionDestination = `/topic/validator/${
+          user.memberAddress || user.username
+        }`;
+        stompClient.subscribe(subscriptionDestination, (message) => {
+          const newNotification = {
+            id: new Date().getTime(),
+            message: message.body,
+            read: false,
+          };
 
-  // Open notifications menu and mark notifications as read.
+          setNotifications((prev) => [...prev, newNotification]);
+          setUnreadCount((prevCount) => prevCount + 1);
+        });
+      },
+    });
+
+    stompClient.activate();
+    return () => stompClient.deactivate();
+  }, [user]);
+
+  // 🔹 **Open Notifications Menu - DO NOT REFETCH ALL**
   const handleNotificationsOpen = (event) => {
     setNotifAnchor(event.currentTarget);
-    setNotifications((prevNotifs) =>
-      prevNotifs.map((notif) => ({ ...notif, read: true }))
-    );
   };
 
   const handleNotifMenuClose = () => {
     setNotifAnchor(null);
   };
 
-  // ---------------------------
-  // Connect to WebSocket server
-  // ---------------------------
-  useEffect(() => {
-    // Create a SockJS connection to your backend endpoint.
-    const socket = new SockJS("http://localhost:8080/ws");
-    const stompClient = new Client({
-      // Use the SockJS instance for the connection.
-      webSocketFactory: () => socket,
-      reconnectDelay: 5000,
-      debug: function (str) {
-        console.log(str);
-      },
-      onConnect: () => {
-        // Subscribe to a topic based on the user.
-        // Here we assume that the user object contains a 'bcAddress' property.
-        // If not, you can use the username or adjust accordingly.
-        const subscriptionDestination = `/topic/validator/${
-          user.bcAddress || user.username
-        }`;
-        stompClient.subscribe(subscriptionDestination, (message) => {
-          // Process the message. For simplicity, assume that the server sends text messages.
-          const notificationMessage = message.body;
-          const newNotification = {
-            id: new Date().getTime(), // generate a unique id
-            message: notificationMessage,
-            read: false,
-          };
-          // Update state to include the new notification.
-          setNotifications((prev) => [...prev, newNotification]);
-        });
-      },
-    });
+  // 🔹 **Mark Notification as Read**
+  const handleNotificationClick = async (notificationId) => {
+    try {
+      await api.put(`/api/notifications/${notificationId}/read`, null, {
+        headers: {
+          Authorization: createBasicAuthHeader(user.username, user.password),
+        },
+      });
 
-    stompClient.activate();
+      // ✅ **Remove Read Notification from Bell Without Reloading**
+      setNotifications((prevNotifs) =>
+        prevNotifs.filter((notif) => notif.id !== notificationId)
+      );
 
-    // Clean up the connection on unmount.
-    return () => {
-      stompClient.deactivate();
-    };
-  }, [user]);
+      // ✅ **Update Unread Count**
+      setUnreadCount((prevCount) => (prevCount > 0 ? prevCount - 1 : 0));
+    } catch (error) {
+      console.error("Error marking notification as read", error);
+    }
+  };
+
+  // 🔹 **Navigate to Full Notifications Page**
+  const handleViewAllNotifications = () => {
+    handleNotifMenuClose();
+    navigate("/notifications", { state: { reload: true } });
+  };
 
   return (
     <DashboardContainer className="fade-in">
       <AppBar position="static" color="default" elevation={1}>
         <Toolbar>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            Welcome, {user.username}
+          <Typography variant="h6" sx={{ flexGrow: 1 }}>
+            Welcome, {user.memberAddress}
           </Typography>
-
           <Box sx={{ display: "flex", alignItems: "center" }}>
-            {/* Notifications Icon */}
             <IconButton
               color="inherit"
               size="large"
-              className="notification-bell"
               onClick={handleNotificationsOpen}
             >
               <Badge badgeContent={unreadCount} color="error">
@@ -139,24 +159,19 @@ function Dashboard({ user, onLogout }) {
               </Badge>
             </IconButton>
 
-            {/* Profile Icon */}
             <IconButton
               color="inherit"
               size="large"
-              onClick={handleProfileMenuOpen}
+              onClick={(e) => setAnchorEl(e.currentTarget)}
               sx={{ ml: 1 }}
             >
               <AccountCircle />
             </IconButton>
           </Box>
         </Toolbar>
-
-        {/* Tabs */}
         <Tabs
           value={activeTab}
-          onChange={handleTabChange}
-          indicatorColor="primary"
-          textColor="primary"
+          onChange={(event, newValue) => setActiveTab(newValue)}
           centered
         >
           <Tab label="Behavior History" value="behaviorHistory" />
@@ -177,27 +192,55 @@ function Dashboard({ user, onLogout }) {
       <Menu
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
-        onClose={handleMenuClose}
+        onClose={() => setAnchorEl(null)}
       >
         <MenuItem onClick={onLogout}>
           <Logout sx={{ mr: 1 }} /> Logout
         </MenuItem>
       </Menu>
 
-      {/* Notifications Menu */}
+      {/* Notifications Menu - Show Only Unread */}
       <Menu
         anchorEl={notifAnchor}
         open={Boolean(notifAnchor)}
         onClose={handleNotifMenuClose}
+        PaperProps={{ sx: { width: 300 } }}
       >
         {notifications.length > 0 ? (
-          notifications.map((notif) => (
-            <MenuItem key={notif.id} onClick={handleNotifMenuClose}>
-              {notif.message}
+          <>
+            {notifications.map((notif) => (
+              <MenuItem
+                key={notif.id}
+                onClick={() => handleNotificationClick(notif.id)}
+              >
+                {notif.message}
+              </MenuItem>
+            ))}
+            <Divider />
+            <MenuItem
+              onClick={handleViewAllNotifications}
+              sx={{ display: "flex", justifyContent: "center" }}
+            >
+              <Button fullWidth color="primary" variant="contained">
+                View All Notifications
+              </Button>
             </MenuItem>
-          ))
+          </>
         ) : (
-          <MenuItem onClick={handleNotifMenuClose}>No notifications</MenuItem>
+          <>
+            <MenuItem onClick={handleNotifMenuClose}>
+              No unread notifications
+            </MenuItem>
+            <Divider />
+            <MenuItem
+              onClick={handleViewAllNotifications}
+              sx={{ display: "flex", justifyContent: "center" }}
+            >
+              <Button fullWidth color="primary" variant="contained">
+                View All Notifications
+              </Button>
+            </MenuItem>
+          </>
         )}
       </Menu>
     </DashboardContainer>

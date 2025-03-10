@@ -4,6 +4,7 @@ import { ThemeProvider, createTheme, CssBaseline } from "@mui/material";
 import Dashboard from "./components/pages/Dashboard";
 import Login from "./components/Auth/Login";
 import Register from "./components/Auth/Register";
+import NotificationsPage from "./components/pages/NotificationsPage";
 
 const theme = createTheme({
   palette: {
@@ -48,6 +49,10 @@ function App() {
                 <Navigate to="/login" />
               )
             }
+          />
+          <Route
+            path="/notifications"
+            element={<NotificationsPage user={user} />}
           />
         </Routes>
       </BrowserRouter>
