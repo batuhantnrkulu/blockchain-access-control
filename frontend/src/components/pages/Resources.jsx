@@ -145,10 +145,37 @@ function Resources({ user }) {
     }
   }, [activeTab, search, page, rowsPerPage]);
 
-  // Open the view dialog.
-  const handleView = (resource) => {
+  const handleView = async (resource) => {
     setSelectedResource(resource);
     setViewOpen(true);
+
+    if (resource.type === "JPG") {
+      try {
+        const response = await fetch(
+          `http://localhost:8080/api/resources/image?path=${encodeURIComponent(
+            resource.jpgResource
+          )}`,
+          {
+            headers: {
+              Authorization: createBasicAuthHeader(
+                user.username,
+                user.password
+              ),
+            },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch image");
+        }
+
+        const blob = await response.blob();
+        const objectURL = URL.createObjectURL(blob);
+        setSelectedResource((prev) => ({ ...prev, objectURL }));
+      } catch (error) {
+        console.error("Error fetching image:", error);
+      }
+    }
   };
 
   // Open the edit dialog with the selected resource.
@@ -367,9 +394,7 @@ function Resources({ user }) {
         <DialogContent>
           {selectedResource && selectedResource.type === "JPG" ? (
             <img
-              src={`http://localhost:8080/api/resources/image?path=${encodeURIComponent(
-                selectedResource.jpgResource
-              )}`}
+              src={selectedResource.objectURL || ""}
               alt="Resource"
               width="400"
             />

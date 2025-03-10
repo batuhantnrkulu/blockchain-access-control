@@ -1,0 +1,33 @@
+/* src/styles/NotificationsPage.css */
+.notifications-page-container {
+  padding: 24px;
+}
+
+.notifications-page-title {
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.notifications-page-loading {
+  margin-top: 40px;
+}
+
+.notifications-list {
+  margin-top: 20px;
+}
+
+.notification-list-item {
+  padding: 16px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.no-notifications {
+  margin-top: 20px;
+}
+
+.pagination-container {
+  margin-top: 20px;
+  padding: 16px 0;
+}
