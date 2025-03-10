@@ -40,12 +40,12 @@ cd Access_Control_Mechanism
 npm install
 ```
 
-#### Start Ganache (Local Blockchain)
+#### Start Ganache (Local Blockchain) (in one terminal)
 ```bash
 npx ganache -a 25
 ```
 
-#### Deploy Smart Contracts
+#### Deploy Smart Contracts (in other terminal(ganache should be run while deploying contracts))
 ```bash
 truffle migrate --network development
 ```
@@ -75,7 +75,8 @@ spring.config.import=optional:file:.env[.properties]
 
 ganache.address=http://127.0.0.1:8545
 
-admin.address=0x1B32742d7af2e266b388A950c62097B61c8a9D01
+#(this should be the first address that ganache provide)
+admin.address=0x1B32742d7af2e266b388A950c62097B61c8a9D01 
 admin.private-key=0xd9b1e163cdf532fe13723ab2b3f9cc21e939a131aca76636eaf18c45db9bd3be
 
 contract.roleTokenAddress=0x60Ee94CECD5D92A4893fFd35Af76D577f6FD5164
@@ -88,6 +89,7 @@ spring.datasource.password=1234
 spring.jpa.hibernate.ddl-auto=update
 spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL8Dialect
 
+# this will automatically come from env file.
 jasypt.encryptor.password=${JASYPT_ENCRYPTOR_SECRET_KEY}
 ```
 
@@ -138,7 +140,7 @@ The frontend will run on **http://localhost:3000**.
 1. **Fork the repository** on GitHub.
 2. **Clone your fork** to your local machine:
    ```bash
-   git clone https://github.com/YOUR_GITHUB_USERNAME/blockchain-access-control.git
+   git clone https://github.com/batuhantnrkulu/blockchain-access-control.git
    cd blockchain-access-control
    ```
 3. **Create a new branch** for your feature or fix:
