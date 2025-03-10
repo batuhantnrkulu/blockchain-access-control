@@ -11,6 +11,7 @@ import org.web3j.protocol.Web3j;
 
 import com.blockchain.accesscontrol.access_control_system.config.TransactionManagerFactory;
 import com.blockchain.accesscontrol.access_control_system.contracts.AccessControlFactory;
+import com.blockchain.accesscontrol.access_control_system.enums.NotificationType;
 import com.blockchain.accesscontrol.access_control_system.model.AccessRequest;
 import com.blockchain.accesscontrol.access_control_system.model.Peer;
 import com.blockchain.accesscontrol.access_control_system.repository.AccessRequestRepository;
@@ -23,14 +24,17 @@ public class AccessRequestService
     private final AccessRequestRepository accessRequestRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final AccessControlService accessControlService;
+    private final NotificationService notificationService;
 	
     public AccessRequestService(PeerRepository peerRepository, AccessRequestRepository accessRequestRepository,
-            SimpMessagingTemplate messagingTemplate, AccessControlService accessControlService) 
+            SimpMessagingTemplate messagingTemplate, AccessControlService accessControlService,
+            NotificationService notificationService) 
     {
 		this.peerRepository = peerRepository;
 		this.accessRequestRepository = accessRequestRepository;
 		this.messagingTemplate = messagingTemplate;
 		this.accessControlService = accessControlService;
+		this.notificationService = notificationService;
 	}
     
     /**
@@ -50,6 +54,10 @@ public class AccessRequestService
         accessRequest.setApproved(false);
         accessRequest.setAccAddress(null);
         accessRequestRepository.save(accessRequest);
+        
+        // create notification that shows subject peer's request on object peer.
+        notificationService.createNotification(objectPeer, subjectPeer.getUsername() + " wants to create access mechanism with you", 
+        		NotificationType.ACCESS_CONTROL);
         
         // Notify the object peer (using its bc_address as the channel)
         String objectNotificationChannel = "/topic/notifications/" + objectPeer.getBcAddress();
@@ -93,6 +101,10 @@ public class AccessRequestService
         accessRequest.setAccAddress(accAddress);
         accessRequest.setApproved(true);
         accessRequestRepository.save(accessRequest);
+        
+        // create notification that shows subject peer's request on object peer.
+        notificationService.createNotification(subjectPeer, objectPeer.getUsername() + " accepted your request.", 
+        		NotificationType.ACCESS_CONTROL);
         
         // Notify the subject peer that access is granted.
         String subjectNotificationChannel = "/topic/notifications/" + subjectPeer.getBcAddress();

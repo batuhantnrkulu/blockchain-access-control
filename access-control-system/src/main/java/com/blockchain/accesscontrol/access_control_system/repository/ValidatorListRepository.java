@@ -1,5 +1,6 @@
 package com.blockchain.accesscontrol.access_control_system.repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -17,4 +18,6 @@ public interface ValidatorListRepository extends JpaRepository<ValidatorList, Lo
 
     @Query("SELECT COUNT(v) FROM ValidatorList v WHERE v.unjoinedPeer.id = :unjoinedPeerId AND v.approved = true")
     long countApprovedValidators(@Param("unjoinedPeerId") Long unjoinedPeerId);
+    
+    List<ValidatorList> findByApprovedFalseAndExpiryTimeBefore(LocalDateTime now);
 }
