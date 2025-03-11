@@ -31,8 +31,8 @@ public class RoleTokenController
     {
         try 
         {
-            roleTokenService.assignRole(peerRegistrationRequest);
-            return ResponseEntity.ok("Role assigned successfully");
+            String message = roleTokenService.assignRole(peerRegistrationRequest);
+            return ResponseEntity.ok(message);
         } 
         catch (Exception e) 
         {

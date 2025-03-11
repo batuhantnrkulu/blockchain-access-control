@@ -68,7 +68,7 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 	}
 	
 	@Transactional
-    public void assignRole(PeerRegistrationRequest peerRegistrationRequest) 
+    public String assignRole(PeerRegistrationRequest peerRegistrationRequest) 
 	{
 		long primaryHeadCount = peerRepository.countAllByRoleAndStatus(Role.PRIMARY_GROUP_HEAD, Status.BENIGN);
         int requiredValidators = calculateRequiredValidators(primaryHeadCount);
@@ -76,10 +76,12 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         if (requiredValidators > 0) 
         {
             assignValidators(peerRegistrationRequest, requiredValidators);
+            return "Request has been sent to Validators to vote!";
         } 
         else 
         {
             assignDirectly(peerRegistrationRequest);
+            return "Role assigned successfully!";
         }
     }
 
@@ -118,7 +120,7 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 	            {
 	            	System.out.println("Role assigned:");
 	                System.out.println("Member Address: " + event.memberAddress);
-	                System.out.println("Role Type: " + event.memberType);
+	                System.out.println("Group: " + event.memberType);
 
 	                // Convert event.memberType (String) to Role Enum
 	                Role assignedRole = RoleUtils.mapRole(event.role);

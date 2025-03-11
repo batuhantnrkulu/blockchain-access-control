@@ -20,7 +20,9 @@ public interface ValidatorListRepository extends JpaRepository<ValidatorList, Lo
     @Query("SELECT COUNT(v) FROM ValidatorList v WHERE v.unjoinedPeer.id = :unjoinedPeerId AND v.approved = true")
     long countApprovedValidators(@Param("unjoinedPeerId") Long unjoinedPeerId);
     
-    List<ValidatorList> findByApprovedFalseAndExpiryTimeBefore(LocalDateTime now);
+    List<ValidatorList> findByExpiryTimeBefore(LocalDateTime now);
     
     Optional<ValidatorList> findByUnjoinedPeerIdAndValidator_BcAddress(Long unjoinedPeerId, String validatorBcAddress);
+    
+    Optional<ValidatorList> findByUnjoinedPeerIdAndValidatorId(Long unjoinedPeerId, Long validatorId);
 }

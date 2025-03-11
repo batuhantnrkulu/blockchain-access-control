@@ -24,6 +24,7 @@ import com.blockchain.accesscontrol.access_control_system.repository.ValidatorLi
 import com.blockchain.accesscontrol.access_control_system.service.BehaviorHistoryService;
 import com.blockchain.accesscontrol.access_control_system.service.NotificationService;
 import com.blockchain.accesscontrol.access_control_system.service.RoleTokenService;
+import com.blockchain.accesscontrol.access_control_system.utils.EncryptionUtil;
 
 import jakarta.transaction.Transactional;
 
@@ -37,10 +38,12 @@ public class ValidatorExpiryService
 	private final BehaviorHistoryService behaviorHistoryService;
 	private final NotificationService notificationService;
 	private final SimpMessagingTemplate messagingTemplate;
+    private final EncryptionUtil encryptionUtil;
 	
 	public ValidatorExpiryService(ValidatorListRepository validatorListRepository, RoleTokenService roleTokenService,
 			NotificationService notificationService, SimpMessagingTemplate messagingTemplate, UnjoinedPeerMapper unjoinedPeerMapper,
-			BehaviorHistoryService behaviorHistoryService, UnjoinedPeerRepository unjoinedPeerRepository) 
+			BehaviorHistoryService behaviorHistoryService, UnjoinedPeerRepository unjoinedPeerRepository,
+			EncryptionUtil encryptionUtil) 
 	{
 		this.validatorListRepository = validatorListRepository;
 		this.roleTokenService = roleTokenService;
@@ -49,6 +52,7 @@ public class ValidatorExpiryService
 		this.messagingTemplate = messagingTemplate;
 		this.unjoinedPeerMapper = unjoinedPeerMapper;
 		this.unjoinedPeerRepository = unjoinedPeerRepository;
+		this.encryptionUtil = encryptionUtil;
 	}
 	
 	public ResponseEntity<?> submitResponse(ValidatorRequestDTO request)
@@ -80,12 +84,40 @@ public class ValidatorExpiryService
         return ResponseEntity.ok("Request recorded successfully.");
 	}
 	
+	/**
+     * Checks whether a validator has responded or if the validation request is expired.
+     *
+     * @param unjoinedPeerId The ID of the unjoined peer.
+     * @param validatorId The ID of the validator (peer).
+     * @return false if expired, true if responded, otherwise null (pending).
+     */
+	public Boolean checkValidationStatus(Long unjoinedPeerId, Long validatorId) 
+	{
+        Optional<ValidatorList> validatorEntry = validatorListRepository
+                .findByUnjoinedPeerIdAndValidatorId(unjoinedPeerId, validatorId);
+
+        if (!validatorEntry.isPresent()) {
+            return null; // No validation request found
+        }
+
+        ValidatorList validatorList = validatorEntry.get();
+
+        // Check if expired
+        if (validatorList.getExpiryTime().isBefore(LocalDateTime.now())) 
+        {
+            return false;
+        }
+
+        // Return responded status
+        return validatorList.getResponded() ? true : false;
+    }
+	
 	@Scheduled(fixedDelay = 60000) // in every one minute
 	@Transactional
 	public void processExpiredValidatorRequests() 
 	{
 		LocalDateTime now = LocalDateTime.now();
-	    List<ValidatorList> expiredRequests = validatorListRepository.findByApprovedFalseAndExpiryTimeBefore(now);
+	    List<ValidatorList> expiredRequests = validatorListRepository.findByExpiryTimeBefore(now);
 
 	    for (ValidatorList validatorEntry : expiredRequests) 
 	    {
@@ -110,7 +142,7 @@ public class ValidatorExpiryService
 		        history.setPeer(validator);
 		        history.setTokenAmount(updatedTokenBalance);  // Save the latest balance
 		        history.setTokenAmountChange(1000L); // Save the deduction amount
-		        history.setReason("Validator did not respond in time");
+		        history.setReason("Responsed on time as Validator");
 		        history.setStatusUpdate(now);
 		        behaviorHistoryService.addHistory(history);
 
@@ -127,8 +159,6 @@ public class ValidatorExpiryService
 		        
 		        // remove validator from the list
 		        validatorListRepository.delete(validatorEntry);
-	        	
-	            continue;
 	        }
 	        else
 	        {
@@ -168,47 +198,49 @@ public class ValidatorExpiryService
 		        // remove validator from the list
 		        validatorListRepository.delete(validatorEntry);
 	        }
-	        
-	        // Group the expired validator assignments by their associated unjoined peer.
-	        Map<UnjoinedPeer, List<ValidatorList>> assignmentsByUnjoinedPeer = expiredRequests.stream()
-	                .collect(Collectors.groupingBy(ValidatorList::getUnjoinedPeer));
-
-	        // For each unjoined peer, calculate consensus and take appropriate action.
-	        for (Map.Entry<UnjoinedPeer, List<ValidatorList>> entry : assignmentsByUnjoinedPeer.entrySet()) 
-	        {
-	            UnjoinedPeer unjoinedPeer = entry.getKey();
-	            List<ValidatorList> assignments = entry.getValue();
-
-	            // Determine how many validator assignments approved the request.
-	            long approvedCount = assignments.stream()
-	                    .filter(vl -> vl.getApproved())
-	                    .count();
-
-	            // Use the stored validatorCount, which is the total expected number.
-	            int totalValidators = unjoinedPeer.getValidatorCount();
-	            double approvalRate = (double)approvedCount / totalValidators;
-
-	            if (approvalRate >= 0.51) 
-	            {
-	                // Consensus achieved: onboard the unjoined peer into the system.
-	            	PeerRegistrationRequest peerRegistrationRequest = unjoinedPeerMapper.toPeerRegistrationRequest(unjoinedPeer);
-	                roleTokenService.assignDirectly(peerRegistrationRequest);
-	                
-	                // Optionally, notify the applicant about their successful registration.
-	                System.out.println("Unjoined peer " + unjoinedPeer.getBcAddress() + " approved by consensus (" + (approvalRate * 100) + "%).");
-	            } 
-	            else 
-	            {
-	                // Consensus not met: the registration is rejected.
-	                System.out.println("Unjoined peer " + unjoinedPeer.getBcAddress() + " rejected by consensus (" + (approvalRate * 100) + "%).");
-	            }
-
-	            // Remove the unjoined peer record from the repository.
-	            unjoinedPeerRepository.delete(unjoinedPeer);
-
-	            // Clean up all validator assignments for this unjoined peer.
-	            validatorListRepository.deleteAll(assignments);
-	        }
 	    }
+	    
+
+        // Group the expired validator assignments by their associated unjoined peer.
+        Map<UnjoinedPeer, List<ValidatorList>> assignmentsByUnjoinedPeer = expiredRequests.stream()
+                .collect(Collectors.groupingBy(ValidatorList::getUnjoinedPeer));
+
+        // For each unjoined peer, calculate consensus and take appropriate action.
+        for (Map.Entry<UnjoinedPeer, List<ValidatorList>> entry : assignmentsByUnjoinedPeer.entrySet()) 
+        {
+            UnjoinedPeer unjoinedPeer = entry.getKey();
+            List<ValidatorList> assignments = entry.getValue();
+
+            // Determine how many validator assignments approved the request.
+            long approvedCount = assignments.stream()
+                    .filter(vl -> vl.getApproved())
+                    .count();
+
+            // Use the stored validatorCount, which is the total expected number.
+            int totalValidators = unjoinedPeer.getValidatorCount();
+            double approvalRate = (double)approvedCount / totalValidators;
+
+            if (approvalRate >= 0.51) 
+            {
+                // Consensus achieved: onboard the unjoined peer into the system.
+            	PeerRegistrationRequest peerRegistrationRequest = unjoinedPeerMapper.toPeerRegistrationRequest(unjoinedPeer);
+                peerRegistrationRequest.setPrivateKey(unjoinedPeer.getPrivateKey(encryptionUtil));
+            	roleTokenService.assignDirectly(peerRegistrationRequest);
+                
+                // Optionally, notify the applicant about their successful registration.
+                System.out.println("Unjoined peer " + unjoinedPeer.getBcAddress() + " approved by consensus (" + (approvalRate * 100) + "%).");
+            } 
+            else 
+            {
+                // Consensus not met: the registration is rejected.
+                System.out.println("Unjoined peer " + unjoinedPeer.getBcAddress() + " rejected by consensus (" + (approvalRate * 100) + "%).");
+            }
+
+            // Remove the unjoined peer record from the repository.
+            unjoinedPeerRepository.delete(unjoinedPeer);
+
+            // Clean up all validator assignments for this unjoined peer.
+            validatorListRepository.deleteAll(assignments);
+        }
 	}
 }
