@@ -131,4 +131,10 @@ public class ResourceService
             file.delete();
         }
     }
+
+    public String getNumericValue(Long id) {
+        Resource existing = resourceRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Resource not found"));
+        return existing.getDataResource();
+    }
 }
