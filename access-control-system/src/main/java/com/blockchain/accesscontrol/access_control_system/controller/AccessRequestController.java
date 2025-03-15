@@ -3,6 +3,8 @@ package com.blockchain.accesscontrol.access_control_system.controller;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -15,9 +17,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.blockchain.accesscontrol.access_control_system.dto.requests.CreateAccessRequestDTO;
+import com.blockchain.accesscontrol.access_control_system.dto.requests.PermissionRequestDTO;
 import com.blockchain.accesscontrol.access_control_system.dto.responses.AccessRequestResponse;
+import com.blockchain.accesscontrol.access_control_system.dto.responses.OtherPeerResourceResponseDTO;
 import com.blockchain.accesscontrol.access_control_system.mapper.AccessRequestMapper;
 import com.blockchain.accesscontrol.access_control_system.model.AccessRequest;
+import com.blockchain.accesscontrol.access_control_system.model.Peer;
 import com.blockchain.accesscontrol.access_control_system.service.AccessRequestService;
 
 @RestController
@@ -71,15 +76,14 @@ public class AccessRequestController
 		}
 	}
 	
-	@GetMapping("/my-requests")
-	public ResponseEntity<List<AccessRequestResponse>> getMyRequests(@RequestParam String username) 
+	@GetMapping("/other-resources")
+    public ResponseEntity<Page<OtherPeerResourceResponseDTO>> getOtherPeersResources(
+            @RequestParam("peerId") Long peerId,
+            @RequestParam(value = "search", required = false) String search,
+            Pageable pageable) 
 	{
-        List<AccessRequestResponse> responseList = accessRequestService.getRequestsICreated(username)
-                .stream()
-                .map(accessRequestMapper::toResponse)
-                .collect(Collectors.toList());
-
-        return ResponseEntity.ok(responseList);
+        Page<OtherPeerResourceResponseDTO> resourcesPage = accessRequestService.getOtherPeersResources(peerId, search, pageable);
+        return ResponseEntity.ok(resourcesPage);
     }
 
     @GetMapping("/requests-to-me")
@@ -92,5 +96,21 @@ public class AccessRequestController
     	
     	return ResponseEntity.ok(responseList);
 
+    }
+    
+    @PostMapping("/request-permissions")
+    public ResponseEntity<?> requestPermissions(@RequestBody PermissionRequestDTO dto) 
+    {
+        try 
+        {
+            accessRequestService.requestPermissions(dto);
+            return ResponseEntity.ok("Permission request successfully sent.");
+        } 
+        catch (Exception e) 
+        {
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error sending permission request: " + e.getMessage());
+        }
     }
 }

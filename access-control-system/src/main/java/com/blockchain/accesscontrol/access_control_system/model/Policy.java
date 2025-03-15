@@ -45,7 +45,4 @@ public class Policy
 
     @Enumerated(EnumType.STRING)
     private Permission permission;
-
-    @Enumerated(EnumType.STRING)
-	private Role role;
 }
