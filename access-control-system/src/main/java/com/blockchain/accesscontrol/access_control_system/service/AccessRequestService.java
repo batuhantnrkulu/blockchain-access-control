@@ -1,40 +1,58 @@
 package com.blockchain.accesscontrol.access_control_system.service;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.aot.generate.AccessControl;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
-import org.web3j.protocol.Web3j;
 
-import com.blockchain.accesscontrol.access_control_system.config.TransactionManagerFactory;
-import com.blockchain.accesscontrol.access_control_system.contracts.AccessControlFactory;
+import com.blockchain.accesscontrol.access_control_system.dto.requests.PermissionRequestDTO;
+import com.blockchain.accesscontrol.access_control_system.dto.responses.OtherPeerResourceResponseDTO;
 import com.blockchain.accesscontrol.access_control_system.enums.NotificationType;
+import com.blockchain.accesscontrol.access_control_system.enums.Permission;
+import com.blockchain.accesscontrol.access_control_system.enums.Role;
+import com.blockchain.accesscontrol.access_control_system.exception.ResourceNotFoundException;
 import com.blockchain.accesscontrol.access_control_system.model.AccessRequest;
 import com.blockchain.accesscontrol.access_control_system.model.Peer;
+import com.blockchain.accesscontrol.access_control_system.model.Policy;
+import com.blockchain.accesscontrol.access_control_system.model.Resource;
 import com.blockchain.accesscontrol.access_control_system.repository.AccessRequestRepository;
 import com.blockchain.accesscontrol.access_control_system.repository.PeerRepository;
+import com.blockchain.accesscontrol.access_control_system.repository.PolicyRepository;
+import com.blockchain.accesscontrol.access_control_system.repository.ResourceRepository;
+
+import jakarta.transaction.Transactional;
 
 @Service
 public class AccessRequestService
 {
 	private final PeerRepository peerRepository;
+	private final ResourceRepository resourceRepository;
     private final AccessRequestRepository accessRequestRepository;
+    private final PolicyRepository policyRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final AccessControlService accessControlService;
     private final NotificationService notificationService;
 	
     public AccessRequestService(PeerRepository peerRepository, AccessRequestRepository accessRequestRepository,
             SimpMessagingTemplate messagingTemplate, AccessControlService accessControlService,
-            NotificationService notificationService) 
+            NotificationService notificationService, ResourceRepository resourceRepository, PolicyRepository policyRepository) 
     {
 		this.peerRepository = peerRepository;
 		this.accessRequestRepository = accessRequestRepository;
 		this.messagingTemplate = messagingTemplate;
 		this.accessControlService = accessControlService;
+		this.resourceRepository = resourceRepository;
 		this.notificationService = notificationService;
+		this.policyRepository = policyRepository;
 	}
     
     /**
@@ -115,12 +133,109 @@ public class AccessRequestService
         return accAddress;
     }
     
-    public List<AccessRequest> getRequestsICreated(String username) {
-        return accessRequestRepository.findBySubjectPeer_Username(username);
+    /**
+     * Retrieves a paginated list of "Other Peers' Resources" for the current peer.
+     * The filtering is based on the current peer's role and group.
+     *
+     * @param peerId   the current peer's ID
+     * @param search   an optional search parameter (not implemented in detail here)
+     * @param pageable pagination details
+     * @return a page of OtherPeerResourceDTO objects
+     */
+    public Page<OtherPeerResourceResponseDTO> getOtherPeersResources(Long peerId, String search, Pageable pageable) 
+    {
+        // Look up the current peer based on peerId.
+        Peer currentPeer = peerRepository.findById(peerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Peer not found with id: " + peerId));
+
+        // Query resources based on the current peer's role.
+        Page<Resource> resourcesPage;
+        
+        if (currentPeer.getRole().toString().equals("PRIMARY_GROUP_HEAD")) 
+        {
+            resourcesPage = (search != null && !search.isEmpty()) 
+                ? resourceRepository.findForPrimaryGroupHeadWithSearch(peerId, currentPeer.getGroup(), search, pageable) 
+                : resourceRepository.findForPrimaryGroupHead(peerId, currentPeer.getGroup(), pageable);
+        } 
+        else 
+        {
+            resourcesPage = (search != null && !search.isEmpty()) 
+                ? resourceRepository.findByPeer_GroupWithSearch(currentPeer.getGroup(), search, pageable) 
+                : resourceRepository.findByPeer_Group(currentPeer.getGroup(), pageable);
+        }
+
+        // Map each resource into a DTO.
+        return resourcesPage.map(resource -> {
+            OtherPeerResourceResponseDTO dto = new OtherPeerResourceResponseDTO();
+            dto.setResourceId(resource.getId());
+            dto.setResourceName(resource.getResourceName());
+            dto.setOwnerPeerName(resource.getPeer().getUsername());
+            dto.setOwnerPeerId(resource.getPeer().getId());
+            
+            // Check if an access request exists between the resource owner and the current peer.
+            AccessRequest accessRequest = accessRequestRepository.findByObjectPeerAndSubjectPeer(resource.getPeer(), currentPeer);
+            
+            if (accessRequest == null) 
+            {
+                dto.setAccessControlStatus("Not Created");
+                dto.setActionsPermissions(null);
+            } 
+            else if (!accessRequest.getApproved()) 
+            {
+                dto.setAccessControlStatus("Pending");
+                dto.setActionsPermissions(null);
+            }
+            else 
+            {
+                dto.setAccessControlStatus("Approved");
+                
+            	// Retrieve the policies defined for this access request and resource.
+                List<Policy> policyList = policyRepository.findByAccessRequestAndResource(accessRequest, resource);
+                Map<String, String> actionsMap = new HashMap<>();
+                
+                // Initialize default states.
+                actionsMap.put("view", "invalid");
+                actionsMap.put("edit", "invalid");
+                actionsMap.put("delete", "invalid");
+
+                for (Policy policy : policyList) {
+                    String key = policy.getAction().toString().toLowerCase(Locale.ENGLISH);
+                    if (policy.getPermission() == Permission.ALLOWED) {
+                        actionsMap.put(key, "valid");
+                    }
+                }
+                dto.setActionsPermissions(actionsMap);
+            }
+            return dto;
+        });
     }
 
     public List<AccessRequest> getRequestsToMe(String username) {
         return accessRequestRepository.findByObjectPeer_Username(username);
+    }
+    
+    @Transactional
+    public void requestPermissions(PermissionRequestDTO dto) 
+    {
+    	AccessRequest accessRequest = accessRequestRepository
+                .findByObjectPeerIdAndSubjectPeerId(dto.getObjectPeerId(), dto.getSubjectPeerId())
+                .orElseThrow(() -> new RuntimeException("AccessRequest not found for given peers"));
+    	
+    	Resource resource = resourceRepository.findById(dto.getResourceId())
+    			.orElseThrow(() -> new RuntimeException("Resource not found for given peers"));
+
+        String notificationMessage = "For ACC(" + accessRequest.getId() + ") Permission Request for Resource(" + resource.getResourceName() + "):" +
+                " | View: " + dto.getView() +
+                ", Edit: " + dto.getEdit() +
+                ", Delete: " + dto.getDelete();
+
+        String objectPeerBcAddress = accessRequest.getObjectPeer().getBcAddress();
+        
+        notificationService.createNotification(accessRequest.getObjectPeer(), notificationMessage, NotificationType.POLICY_REQUEST);
+        
+        // Notify the subject peer that access is granted.
+        String subjectNotificationChannel = "/topic/notifications/" + objectPeerBcAddress;
+        messagingTemplate.convertAndSend(subjectNotificationChannel, notificationMessage);
     }
 	
 }
