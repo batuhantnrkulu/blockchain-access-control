@@ -175,6 +175,26 @@ function Resources({ user }) {
       } catch (error) {
         console.error("Error fetching image:", error);
       }
+    } else {
+      try {
+        const response = await fetch(
+            `http://localhost:8080/api/resources/numeric-data?id=${resource.id}`,
+            {
+                headers: {
+                    Authorization: createBasicAuthHeader(user.username, user.password),
+                },
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error("Failed to fetch numeric data");
+        }
+
+        const data = await response.text();
+        setSelectedResource((prev) => ({ ...prev, dataResource: data }));
+    } catch (error) {
+        console.error("Error fetching numeric data:", error);
+    }
     }
   };
 
