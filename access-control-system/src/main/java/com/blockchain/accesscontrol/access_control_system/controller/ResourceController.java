@@ -14,7 +14,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,6 +28,7 @@ import com.blockchain.accesscontrol.access_control_system.dto.responses.Resource
 import com.blockchain.accesscontrol.access_control_system.mapper.ResourceMapper;
 import com.blockchain.accesscontrol.access_control_system.model.Resource;
 import com.blockchain.accesscontrol.access_control_system.service.ResourceService;
+import com.blockchain.accesscontrol.access_control_system.utils.ByteArrayMultipartFile;
 import com.blockchain.accesscontrol.access_control_system.utils.EncryptionUtil;
 
 @RestController
@@ -38,9 +38,6 @@ public class ResourceController
     private final ResourceService resourceService;
     private final ResourceMapper resourceMapper;
     private final EncryptionUtil encryptionUtil;
-    // To DO : To use secret key from application.properties
-    @Value("${aes.secret.key}")
-    private String encryptionKey;
 
     public ResourceController(ResourceService resourceService, ResourceMapper resourceMapper, EncryptionUtil encryptionUtil) 
     {
@@ -63,15 +60,20 @@ public class ResourceController
     {
         try 
         {
-            if (file != null) {
+            if (file != null) 
+            {
                 ByteArrayOutputStream encryptedFileOutputStream = new ByteArrayOutputStream();
-                encryptionUtil.encryptFile(file.getInputStream(), encryptedFileOutputStream, encryptionKey);
+                encryptionUtil.encryptFile(file.getInputStream(), encryptedFileOutputStream);
                 byte[] encryptedFileBytes = encryptedFileOutputStream.toByteArray();
-                file = new MockMultipartFile(file.getName(), file.getOriginalFilename(), file.getContentType(), encryptedFileBytes);
+                
+                file = new ByteArrayMultipartFile(encryptedFileBytes, file.getOriginalFilename(), file.getContentType());
             }
-            if (dataResource != null) {
+            
+            if (dataResource != null) 
+            {
                 dataResource = encryptionUtil.encrypt(dataResource);
             }
+            
             Resource resource = resourceService.createResource(username, resourceName, file, dataResource);
             ResourceResponseDTO responseDTO = resourceMapper.resourceToResourceResponseDTO(resource);
             return ResponseEntity.ok(responseDTO);
@@ -111,15 +113,19 @@ public class ResourceController
     {
         try 
         {    
-            if (file != null) {
+            if (file != null) 
+            {
                 ByteArrayOutputStream encryptedFileOutputStream = new ByteArrayOutputStream();
-                encryptionUtil.encryptFile(file.getInputStream(), encryptedFileOutputStream, encryptionKey);
+                encryptionUtil.encryptFile(file.getInputStream(), encryptedFileOutputStream);
                 byte[] encryptedFileBytes = encryptedFileOutputStream.toByteArray();
-                file = new MockMultipartFile(file.getName(), file.getOriginalFilename(), file.getContentType(), encryptedFileBytes);
+                file = new ByteArrayMultipartFile(encryptedFileBytes, file.getOriginalFilename(), file.getContentType());
             }
-            if (dataResource != null) {
+            
+            if (dataResource != null) 
+            {
                 dataResource = encryptionUtil.encrypt(dataResource);
             }
+            
             Resource updatedResource = resourceService.updateResource(id, resourceName, file, dataResource);
             ResourceResponseDTO responseDTO = resourceMapper.resourceToResourceResponseDTO(updatedResource);
             return ResponseEntity.ok(responseDTO);
@@ -149,7 +155,7 @@ public class ResourceController
         try {
             Path imagePath = Paths.get(path);
             ByteArrayOutputStream decryptedFileOutputStream = new ByteArrayOutputStream();
-            encryptionUtil.decryptFile(Files.newInputStream(imagePath), decryptedFileOutputStream, encryptionKey);
+            encryptionUtil.decryptFile(Files.newInputStream(imagePath), decryptedFileOutputStream);
             byte[] decryptedFileBytes = decryptedFileOutputStream.toByteArray();
             org.springframework.core.io.Resource resource = new ByteArrayResource(decryptedFileBytes);
 
