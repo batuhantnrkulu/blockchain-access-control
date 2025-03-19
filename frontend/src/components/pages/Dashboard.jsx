@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import {
   AppBar,
   Toolbar,
+  Chip,
   Typography,
   IconButton,
   Menu,
@@ -29,6 +30,8 @@ import "../../styles/Dashboard.css";
 import SockJS from "sockjs-client";
 import { Client } from "@stomp/stompjs";
 
+import { useLocation } from "react-router-dom";
+
 const DashboardContainer = styled("div")({
   display: "flex",
   flexDirection: "column",
@@ -48,6 +51,16 @@ function Dashboard({ user, onLogout }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [anchorEl, setAnchorEl] = useState(null);
   const [notifAnchor, setNotifAnchor] = useState(null);
+  const location = useLocation();
+  const navigationState = location.state || {}; // Handle case where no state is passed
+
+  useEffect(() => {
+    if (navigationState.activeTab) {
+      setActiveTab("accessContracts");
+      // Clear all navigation state properties
+      window.history.replaceState({}, document.title);
+    }
+  }, [navigationState]);
 
   // 🔹 **Fetch Unread Notifications (Only Once on Load)**
   const fetchUnreadNotifications = async () => {
@@ -147,6 +160,19 @@ function Dashboard({ user, onLogout }) {
         <Toolbar>
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
             Welcome, {user.memberAddress}
+            <Chip
+              label={`Peer's Current Status: ${user.status}`}
+              sx={{
+                ml: 2,
+                backgroundColor:
+                  user.status === "BENIGN"
+                    ? "#4CAF50"
+                    : user.status === "SUSPICIOUS"
+                    ? "#FF9800"
+                    : "#F44336",
+                color: "white",
+              }}
+            />
           </Typography>
           <Box sx={{ display: "flex", alignItems: "center" }}>
             <IconButton
@@ -183,7 +209,11 @@ function Dashboard({ user, onLogout }) {
       <MainContent>
         {activeTab === "behaviorHistory" && <BehaviorHistory user={user} />}
         {activeTab === "accessContracts" && (
-          <AccessControlContracts user={user} onLogout={onLogout} />
+          <AccessControlContracts
+            user={user}
+            onLogout={onLogout}
+            navigationState={navigationState}
+          />
         )}
         {activeTab === "resources" && <Resources user={user} />}
       </MainContent>
