@@ -328,4 +328,23 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         
         return unjoinedPeerMapper.toDto(optionalPeer.get());
     }
+    
+    public void assignAdminRole(String contractAddress) 
+    {
+        RoleToken contract = loadContract(RoleToken.class);
+        
+        try 
+        {
+            TransactionReceipt receipt = contract.assignAdminRole(contractAddress).send();
+        
+            if (!receipt.isStatusOK()) 
+            {
+                throw new RuntimeException("Failed to assign admin role to contract: " + contractAddress);
+            }
+        } 
+        catch (Exception e) 
+        {
+            throw new RuntimeException("Error assigning admin role to contract: " + contractAddress, e);
+        }
+    }
 }

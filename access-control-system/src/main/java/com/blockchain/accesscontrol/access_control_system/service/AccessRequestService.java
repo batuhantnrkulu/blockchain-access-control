@@ -41,10 +41,12 @@ public class AccessRequestService
     private final SimpMessagingTemplate messagingTemplate;
     private final AccessControlService accessControlService;
     private final NotificationService notificationService;
+    private final RoleTokenService roleTokenService;
 	
     public AccessRequestService(PeerRepository peerRepository, AccessRequestRepository accessRequestRepository,
             SimpMessagingTemplate messagingTemplate, AccessControlService accessControlService,
-            NotificationService notificationService, ResourceRepository resourceRepository, PolicyRepository policyRepository) 
+            NotificationService notificationService, ResourceRepository resourceRepository, PolicyRepository policyRepository,
+            RoleTokenService roleTokenService) 
     {
 		this.peerRepository = peerRepository;
 		this.accessRequestRepository = accessRequestRepository;
@@ -53,6 +55,7 @@ public class AccessRequestService
 		this.resourceRepository = resourceRepository;
 		this.notificationService = notificationService;
 		this.policyRepository = policyRepository;
+		this.roleTokenService = roleTokenService;
 	}
     
     /**
@@ -114,6 +117,8 @@ public class AccessRequestService
         
         // Deploy the ACC using the object peer's credentials.
         String accAddress = accessControlService.deployAccessControlContract(objectPeer.getId(), subjectPeer.getId(), accType);
+        
+        roleTokenService.assignAdminRole(accAddress);
         
         // Update the access request.
         accessRequest.setAccAddress(accAddress);

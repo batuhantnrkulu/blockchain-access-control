@@ -42,5 +42,4 @@ public class BehaviorHistory
 
 	@Column(name = "status_update")
 	private LocalDateTime statusUpdate;
-
 }

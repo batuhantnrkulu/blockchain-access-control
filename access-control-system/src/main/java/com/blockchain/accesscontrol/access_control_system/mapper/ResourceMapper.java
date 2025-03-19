@@ -12,6 +12,7 @@ public interface ResourceMapper
 {
 	// Maps the Resource entity to the ResourceResponseDTO.
     // The peer field is mapped to peerUsername from peer.username.
+    @Mapping(source = "peer.id", target = "ownerPeerId")
     @Mapping(source = "peer.username", target = "peerUsername")
     ResourceResponseDTO resourceToResourceResponseDTO(Resource resource);
 

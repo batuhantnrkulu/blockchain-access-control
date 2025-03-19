@@ -80,6 +80,9 @@ public class Peer
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt = LocalDateTime.now();
 	
+	@Column(name = "blocking_end_time")
+	private LocalDateTime blockingEndTime;
+	
 	@OneToMany(mappedBy = "peer", cascade = CascadeType.ALL, orphanRemoval = true)
 	private List<Resource> resources;
 	

@@ -16,4 +16,5 @@ public class MemberDTO
 	private String status;
 	private LocalDateTime lastStatusUpdate;
 	private Role role;
+	private String blockingEndTime;
 }

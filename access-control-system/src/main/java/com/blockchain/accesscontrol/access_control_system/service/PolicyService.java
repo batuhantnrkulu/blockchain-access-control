@@ -1,10 +1,16 @@
 package com.blockchain.accesscontrol.access_control_system.service;
 
 import java.math.BigInteger;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
@@ -16,9 +22,11 @@ import com.blockchain.accesscontrol.access_control_system.dto.responses.PolicySt
 import com.blockchain.accesscontrol.access_control_system.enums.Action;
 import com.blockchain.accesscontrol.access_control_system.enums.Permission;
 import com.blockchain.accesscontrol.access_control_system.model.AccessRequest;
+import com.blockchain.accesscontrol.access_control_system.model.Peer;
 import com.blockchain.accesscontrol.access_control_system.model.Policy;
 import com.blockchain.accesscontrol.access_control_system.model.Resource;
 import com.blockchain.accesscontrol.access_control_system.repository.AccessRequestRepository;
+import com.blockchain.accesscontrol.access_control_system.repository.PeerRepository;
 import com.blockchain.accesscontrol.access_control_system.repository.PolicyRepository;
 import com.blockchain.accesscontrol.access_control_system.repository.ResourceRepository;
 import com.blockchain.accesscontrol.access_control_system.utils.EncryptionUtil;
@@ -32,23 +40,52 @@ public class PolicyService extends BaseContractService<AccessControlContract>
     private final AccessRequestRepository accessRequestRepository;
     private final ResourceRepository resourceRepository;
     private final EncryptionUtil encryptionUtil;
+    private final PeerService peerService;
+    private final PeerRepository peerRepository;
 
     public PolicyService(Web3j web3j, TransactionManagerFactory transactionManagerFactory, PolicyRepository policyRepository, AccessRequestRepository accessRequestRepository,
-    		ResourceRepository resourceRepository, EncryptionUtil encryptionUtil) 
+    		ResourceRepository resourceRepository, EncryptionUtil encryptionUtil, PeerService peerService, PeerRepository peerRepository) 
     {
     	super(web3j, transactionManagerFactory, "0x0");
         this.policyRepository = policyRepository;
         this.accessRequestRepository = accessRequestRepository;
         this.resourceRepository = resourceRepository;
         this.encryptionUtil = encryptionUtil;
+        this.peerService = peerService;
+        this.peerRepository = peerRepository;
+    }
+    
+    private void handleMaliciousActivity(AccessControlContract.MaliciousActivityReportedEventResponse event) 
+    {
+    	LocalDateTime blockingEndTime = LocalDateTime.ofInstant(
+            Instant.ofEpochSecond(event.blockingEndTime.longValue()), 
+            ZoneId.systemDefault()
+        );
+
+        peerService.updateMaliciousPeerInfo(
+            event.subject, 
+            event.penaltyAmount, 
+            event.reason, 
+            blockingEndTime, 
+            event.newStatus
+        );
     }
     
     /**
      * Calls the on-chain policyAdd function.
      */
-    public TransactionReceipt addPolicyOnChain(String accAddress, String objectPeerPrivateKey, String resource, String action, String permission) throws Exception {
+    public void addPolicyOnChain(String accAddress, String objectPeerPrivateKey, String resource, String action, String permission) throws Exception {
         AccessControlContract contract = loadContract(AccessControlContract.class, accAddress, objectPeerPrivateKey);
-        return contract.policyAdd(resource, action, permission).send();
+        TransactionReceipt receipt = contract.policyAdd(resource, action, permission).send();
+
+        List<AccessControlContract.MaliciousActivityReportedEventResponse> events = contract.getMaliciousActivityReportedEvents(receipt);
+
+        if (!events.isEmpty()) {
+            for (AccessControlContract.MaliciousActivityReportedEventResponse event : events) {
+                handleMaliciousActivity(event);
+            }
+            throw new SecurityException("Unauthorized policy addition detected! Peer has been penalized.");
+        }
     }
     
     /**
@@ -56,7 +93,18 @@ public class PolicyService extends BaseContractService<AccessControlContract>
      */
     public TransactionReceipt updatePolicyOnChain(BigInteger policyId, String accAddress, String objectPeerPrivateKey, String resource, String action, String permission) throws Exception {
         AccessControlContract contract = loadContract(AccessControlContract.class, accAddress, objectPeerPrivateKey);
-        return contract.policyUpdate(policyId, resource, action, permission).send();
+        TransactionReceipt receipt = contract.policyUpdate(policyId, resource, action, permission).send();
+
+        List<AccessControlContract.MaliciousActivityReportedEventResponse> events = contract.getMaliciousActivityReportedEvents(receipt);
+
+        if (!events.isEmpty()) {
+            for (AccessControlContract.MaliciousActivityReportedEventResponse event : events) {
+                handleMaliciousActivity(event);
+            }
+            throw new SecurityException("Unauthorized policy update detected! Peer has been penalized.");
+        }
+
+        return receipt;
     }
     
     /**
@@ -64,7 +112,18 @@ public class PolicyService extends BaseContractService<AccessControlContract>
      */
     public TransactionReceipt deletePolicyOnChain(BigInteger policyId, String accAddress, String objectPeerPrivateKey) throws Exception {
         AccessControlContract contract = loadContract(AccessControlContract.class, accAddress, objectPeerPrivateKey);
-        return contract.policyDelete(policyId).send();
+        TransactionReceipt receipt = contract.policyDelete(policyId).send();
+
+        List<AccessControlContract.MaliciousActivityReportedEventResponse> events = contract.getMaliciousActivityReportedEvents(receipt);
+
+        if (!events.isEmpty()) {
+            for (AccessControlContract.MaliciousActivityReportedEventResponse event : events) {
+                handleMaliciousActivity(event);
+            }
+            throw new SecurityException("Unauthorized policy deletion detected! Peer has been penalized.");
+        }
+
+        return receipt;
     }
 
     /**
@@ -75,9 +134,10 @@ public class PolicyService extends BaseContractService<AccessControlContract>
      *
      * @param request the bulk update request containing accessRequestId, resourceId, and the three action states.
      * @return A list of messages indicating the outcome for each action.
+     * @throws Exception 
      */
     @Transactional
-    public List<String> updatePolicies(PolicyBulkUpdateRequest request) {
+    public List<String> updatePolicies(PolicyBulkUpdateRequest request) throws Exception {
         List<String> messages = new ArrayList<>();
         try {
             messages.add(updateSinglePolicy(request.getAccessRequestId(), request.getResourceId(), "VIEW", request.getView()));
@@ -85,7 +145,7 @@ public class PolicyService extends BaseContractService<AccessControlContract>
             messages.add(updateSinglePolicy(request.getAccessRequestId(), request.getResourceId(), "DELETE", request.getDelete()));
         } catch (Exception e) {
             e.printStackTrace(); // Log the error
-            messages.add("Error processing policy update: " + e.getMessage());
+            throw e;
         }
         return messages;
     }
@@ -98,6 +158,11 @@ public class PolicyService extends BaseContractService<AccessControlContract>
         // Fetch the Resource record
         Resource resource = resourceRepository.findById(resourceId)
                 .orElseThrow(() -> new RuntimeException("Resource not found with id: " + resourceId));
+        
+        if (peerService.isPeerBlocked(accessRequest.getObjectPeer().getBcAddress()).isBlocked()) 
+        {
+            throw new RuntimeException("Operation aborted: Peer is currently blocked from performing policy updates.");
+        }
 
         // Convert the incoming action string to the enum (e.g., "VIEW", "EDIT", or "DELETE")
         Action action;
@@ -119,32 +184,47 @@ public class PolicyService extends BaseContractService<AccessControlContract>
         // Retrieve on-chain parameters: the ACC address from the AccessRequest and
         // object peer's private key
         String accAddress = accessRequest.getAccAddress(); 
-        String objectPeerPrivateKey = accessRequest.getObjectPeer().getPrivateKey(encryptionUtil);
+        
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String callerUsername = auth.getName();
+
+        Peer authenticatedPeer = peerRepository.findByUsername(callerUsername)
+                .orElseThrow(() -> new RuntimeException("Authenticated Peer not found"));
+
+        boolean isSubjectPeer = authenticatedPeer.getId().equals(accessRequest.getSubjectPeer().getId());
+
+        String privateKey = isSubjectPeer
+                ? accessRequest.getSubjectPeer().getPrivateKey(encryptionUtil)
+                : accessRequest.getObjectPeer().getPrivateKey(encryptionUtil);
+        
         
         if (allow) {
-            if (!policyOpt.isPresent()) {
+            if (!policyOpt.isPresent()) 
+            {	
+            	// on chain side
+                addPolicyOnChain(accAddress, privateKey,
+                        resource.getResourceName(), action.name().toLowerCase(Locale.ENGLISH), "allow");
+            	
                 Policy newPolicy = new Policy();
                 newPolicy.setAccessRequest(accessRequest);
                 newPolicy.setResource(resource);
                 newPolicy.setObjectPeer(resource.getPeer());
                 newPolicy.setAction(action);
                 newPolicy.setPermission(Permission.ALLOWED);
-                policyRepository.save(newPolicy);
-
-                // Call on-chain: add policy
-                // Note: You may want to capture the on-chain policyId from the event or receipt and store it.
-                addPolicyOnChain(accAddress, objectPeerPrivateKey,
-                        resource.getResourceName(), action.name(), "allow");
+                policyRepository.save(newPolicy);   
             }
             return "Policy updated: action " + action + " allowed.";
         } else {
-            if (policyOpt.isPresent()) {
-                Policy existingPolicy = policyOpt.get();
+            if (policyOpt.isPresent()) 
+            {
+            	Policy existingPolicy = policyOpt.get();
                 BigInteger policyId = BigInteger.valueOf(existingPolicy.getId());  
+            	
+            	// Call on-chain: delete policy
+                deletePolicyOnChain(policyId, accAddress, privateKey);
+                
+                // off chain side
                 policyRepository.delete(existingPolicy);
-
-                // Call on-chain: delete policy
-                deletePolicyOnChain(policyId, accAddress, objectPeerPrivateKey);
 
                 return "Policy removed: action " + action + " disallowed.";
             }

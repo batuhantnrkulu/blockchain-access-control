@@ -4,6 +4,7 @@ import java.math.BigInteger;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 
 import org.mapstruct.Builder;
 import org.mapstruct.Mapper;
@@ -29,12 +30,21 @@ public interface MemberMapper {
     @Mapping(source = "bcStatus", target = "status", qualifiedByName = "mapStatusToString")
     @Mapping(source = "bcLastStatusUpdate", target = "lastStatusUpdate")
     @Mapping(source = "group", target = "memberType")
+    @Mapping(source = "blockingEndTime", target = "blockingEndTime", qualifiedByName = "formatDateTime")
     MemberDTO toMemberDTO(Peer peer);
 
     @Named("mapStatusToString")
     default String mapStatusToString(Status status) 
     {
         return status != null ? status.name() : null; //Converts enum to string: BENIGN, SUSPICIOUS, MALICIOUS)
+    }
+    
+    // Custom mapping method to format LocalDateTime
+    @Named("formatDateTime")
+    default String formatDateTime(LocalDateTime dateTime) {
+        return dateTime != null 
+            ? dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) 
+            : null;
     }
     
     // Custom mapping for BigInteger to LocalDateTime
