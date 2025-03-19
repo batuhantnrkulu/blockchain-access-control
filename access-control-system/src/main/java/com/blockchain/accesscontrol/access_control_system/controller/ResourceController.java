@@ -1,16 +1,20 @@
 package com.blockchain.accesscontrol.access_control_system.controller;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import org.springframework.core.io.UrlResource;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,18 +29,24 @@ import com.blockchain.accesscontrol.access_control_system.dto.responses.Resource
 import com.blockchain.accesscontrol.access_control_system.mapper.ResourceMapper;
 import com.blockchain.accesscontrol.access_control_system.model.Resource;
 import com.blockchain.accesscontrol.access_control_system.service.ResourceService;
+import com.blockchain.accesscontrol.access_control_system.utils.EncryptionUtil;
 
 @RestController
 @RequestMapping("/api/resources")
 public class ResourceController 
 {
-	private final ResourceService resourceService;
-	private final ResourceMapper resourceMapper;
+    private final ResourceService resourceService;
+    private final ResourceMapper resourceMapper;
+    private final EncryptionUtil encryptionUtil;
+    // To DO : To use secret key from application.properties
+    @Value("${aes.secret.key}")
+    private String encryptionKey;
 
-    public ResourceController(ResourceService resourceService, ResourceMapper resourceMapper) 
+    public ResourceController(ResourceService resourceService, ResourceMapper resourceMapper, EncryptionUtil encryptionUtil) 
     {
         this.resourceService = resourceService;
         this.resourceMapper = resourceMapper;
+        this.encryptionUtil = encryptionUtil;
     }
 
     /**
@@ -53,6 +63,15 @@ public class ResourceController
     {
         try 
         {
+            if (file != null) {
+                ByteArrayOutputStream encryptedFileOutputStream = new ByteArrayOutputStream();
+                encryptionUtil.encryptFile(file.getInputStream(), encryptedFileOutputStream, encryptionKey);
+                byte[] encryptedFileBytes = encryptedFileOutputStream.toByteArray();
+                file = new MockMultipartFile(file.getName(), file.getOriginalFilename(), file.getContentType(), encryptedFileBytes);
+            }
+            if (dataResource != null) {
+                dataResource = encryptionUtil.encrypt(dataResource);
+            }
             Resource resource = resourceService.createResource(username, resourceName, file, dataResource);
             ResourceResponseDTO responseDTO = resourceMapper.resourceToResourceResponseDTO(resource);
             return ResponseEntity.ok(responseDTO);
@@ -91,7 +110,16 @@ public class ResourceController
             @RequestParam(value = "dataResource", required = false) String dataResource) 
     {
         try 
-        {
+        {    
+            if (file != null) {
+                ByteArrayOutputStream encryptedFileOutputStream = new ByteArrayOutputStream();
+                encryptionUtil.encryptFile(file.getInputStream(), encryptedFileOutputStream, encryptionKey);
+                byte[] encryptedFileBytes = encryptedFileOutputStream.toByteArray();
+                file = new MockMultipartFile(file.getName(), file.getOriginalFilename(), file.getContentType(), encryptedFileBytes);
+            }
+            if (dataResource != null) {
+                dataResource = encryptionUtil.encrypt(dataResource);
+            }
             Resource updatedResource = resourceService.updateResource(id, resourceName, file, dataResource);
             ResourceResponseDTO responseDTO = resourceMapper.resourceToResourceResponseDTO(updatedResource);
             return ResponseEntity.ok(responseDTO);
@@ -118,9 +146,12 @@ public class ResourceController
     @GetMapping("/image")
     public ResponseEntity<org.springframework.core.io.Resource> getImage(@RequestParam("path") String path) throws IOException 
     {
-    	try {
+        try {
             Path imagePath = Paths.get(path);
-            org.springframework.core.io.Resource resource = new UrlResource(imagePath.toUri());
+            ByteArrayOutputStream decryptedFileOutputStream = new ByteArrayOutputStream();
+            encryptionUtil.decryptFile(Files.newInputStream(imagePath), decryptedFileOutputStream, encryptionKey);
+            byte[] decryptedFileBytes = decryptedFileOutputStream.toByteArray();
+            org.springframework.core.io.Resource resource = new ByteArrayResource(decryptedFileBytes);
 
             if (resource.exists() || resource.isReadable()) {
                 return ResponseEntity.ok()
@@ -132,6 +163,23 @@ public class ResourceController
             }
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();
+        }
+    }
+
+    /**
+     * Retrieves numeric data for a resource.
+     */
+    @GetMapping("/numeric-data")
+    public ResponseEntity<String> getNumericData(@RequestParam("id") Long id) 
+    {
+        try {
+            String dataResource = resourceService.getNumericValue(id);
+            if (dataResource != null) {
+                dataResource = encryptionUtil.decrypt(dataResource);
+            }
+            return ResponseEntity.ok().body(dataResource);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
         }
     }
 }
