@@ -23,8 +23,10 @@ public interface ResourceRepository extends JpaRepository<Resource, Long>
     @Query("SELECT r FROM Resource r WHERE ((r.peer.role = 'PRIMARY_GROUP_HEAD' AND r.peer.id <> :peerId) OR (r.peer.group = :group AND r.peer.id <> :peerId)) AND LOWER(r.resourceName) LIKE LOWER(CONCAT('%', :search, '%'))")
     Page<Resource> findForPrimaryGroupHeadWithSearch(@Param("peerId") Long peerId, @Param("group") String group, @Param("search") String search, Pageable pageable);
     
-    Page<Resource> findByPeer_Group(String group, Pageable pageable);
+    @Query("SELECT r FROM Resource r WHERE r.peer.group = :group AND r.peer.id <> :peerId")
+    Page<Resource> findByGroupExcludingPeer(@Param("peerId") Long peerId, @Param("group") String group, Pageable pageable);
     
-    @Query("SELECT r FROM Resource r WHERE r.peer.group = :group AND LOWER(r.resourceName) LIKE LOWER(CONCAT('%', :search, '%'))")
-    Page<Resource> findByPeer_GroupWithSearch(@Param("group") String group, @Param("search") String search, Pageable pageable);
+    @Query("SELECT r FROM Resource r WHERE r.peer.group = :group AND LOWER(r.resourceName) LIKE LOWER(CONCAT('%', :search, '%')) " +
+           "AND r.peer.id <> :peerId")
+    Page<Resource> findByGroupWithSearchExcludingPeer(@Param("peerId") Long peerId, @Param("group") String group, @Param("search") String search, Pageable pageable);
 }

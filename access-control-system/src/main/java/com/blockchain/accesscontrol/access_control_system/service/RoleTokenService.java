@@ -1,5 +1,6 @@
 package com.blockchain.accesscontrol.access_control_system.service;
 
+import java.io.IOException;
 import java.math.BigInteger;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -11,6 +12,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
+import org.web3j.protocol.exceptions.TransactionException;
 
 import com.blockchain.accesscontrol.access_control_system.config.TransactionManagerFactory;
 import com.blockchain.accesscontrol.access_control_system.contracts.RoleToken;
@@ -25,6 +27,7 @@ import com.blockchain.accesscontrol.access_control_system.mapper.UnjoinedPeerMap
 import com.blockchain.accesscontrol.access_control_system.model.Peer;
 import com.blockchain.accesscontrol.access_control_system.model.UnjoinedPeer;
 import com.blockchain.accesscontrol.access_control_system.model.ValidatorList;
+import com.blockchain.accesscontrol.access_control_system.repository.BehaviorHistoryRepository;
 import com.blockchain.accesscontrol.access_control_system.repository.PeerRepository;
 import com.blockchain.accesscontrol.access_control_system.repository.UnjoinedPeerRepository;
 import com.blockchain.accesscontrol.access_control_system.repository.ValidatorListRepository;
@@ -45,6 +48,8 @@ public class RoleTokenService extends BaseContractService<RoleToken>
     private final PasswordEncoder passwordEncoder;
     private final NotificationService notificationService;
     private final UnjoinedPeerMapper unjoinedPeerMapper;
+    private final BehaviorHistoryRepository behaviorHistoryRepository;
+    private final ConsensusUtil consensusUtil;
     
     // Inject the WebSocket messaging template
     private final SimpMessagingTemplate messagingTemplate;
@@ -53,7 +58,8 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 			@Value("${contract.roleTokenAddress}") String contractAddress, MemberMapper memberMapper,
 			PeerRepository peerRepository, ValidatorListRepository validatorListRepository,
 			UnjoinedPeerRepository unjoinedPeerRepository, EncryptionUtil encryptionUtil, PasswordEncoder passwordEncoder,
-			SimpMessagingTemplate messagingTemplate, NotificationService notificationService, UnjoinedPeerMapper unjoinedPeerMapper) 
+			SimpMessagingTemplate messagingTemplate, NotificationService notificationService, UnjoinedPeerMapper unjoinedPeerMapper,
+			BehaviorHistoryRepository behaviorHistoryRepository, ConsensusUtil consensusUtil) 
 	{
 		super(web3j, transactionManagerFactory, contractAddress);
 		this.memberMapper = memberMapper;
@@ -65,13 +71,15 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 		this.messagingTemplate = messagingTemplate;
 		this.notificationService = notificationService;
 		this.unjoinedPeerMapper = unjoinedPeerMapper;
+		this.behaviorHistoryRepository = behaviorHistoryRepository;
+		this.consensusUtil = consensusUtil;
 	}
 	
 	@Transactional
     public String assignRole(PeerRegistrationRequest peerRegistrationRequest) 
 	{
 		long primaryHeadCount = peerRepository.countAllByRoleAndStatus(Role.PRIMARY_GROUP_HEAD, Status.BENIGN);
-        int requiredValidators = calculateRequiredValidators(primaryHeadCount);
+        int requiredValidators = calculateRequiredValidators(primaryHeadCount); // for skipping 0
 
         if (requiredValidators > 0) 
         {
@@ -85,21 +93,24 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         }
     }
 
-    private int calculateRequiredValidators(long primaryHeadCount) 
-    {
-    	if (primaryHeadCount < 3) 
-    	{
-            return 0; // No validators if fewer than 3 primary heads
-        }
-
-        double A = 12.0; // Scaling factor for validator growth
-        double K = 2.0;  // Small constant to prevent log(0)
-        
-        // change of base rule: Math.log(primaryHeadCount + K) / Math.log(2))
-        int validators = (int)Math.ceil(A * (Math.log(primaryHeadCount + K) / Math.log(2)) / Math.sqrt(primaryHeadCount));
-
-        return Math.min(validators, (int)primaryHeadCount); // Ensure validators ≤ primary heads
-    }
+	private int calculateRequiredValidators(long primaryHeadCount) 
+	{
+	    if (primaryHeadCount < 4) 
+	    	return 0;
+	    
+	    // Inspired by OmniLedger's committee scaling (logarithmic) and 
+	    // Algorand's committee size analysis (square root)
+	    double logFactor = Math.log(primaryHeadCount + 1); // Natural logarithm
+	    double sqrtFactor = Math.sqrt(primaryHeadCount);
+	    
+	    // Hybrid approach combining both log and sqrt terms
+	    int validators = (int) Math.ceil(3.0 * logFactor + 0.5 * sqrtFactor);
+	    
+	    // Ensure minimum of 4 validators for BFT safety (Castro and Liskov, 2002)
+	    validators = Math.max(validators, 4);
+	    
+	    return Math.min(validators, (int) primaryHeadCount);
+	}
 
     public void assignDirectly(PeerRegistrationRequest peerRegistrationRequest) 
     {
@@ -190,7 +201,7 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         unjoinedPeer.setValidatorCount(count);
         unjoinedPeer = unjoinedPeerRepository.save(unjoinedPeer);
 
-        List<Peer> selectedValidators = ConsensusUtil.selectWeightedRandom(primaryHeads, count);
+        List<Peer> selectedValidators = consensusUtil.selectWeightedRandom(primaryHeads, count, behaviorHistoryRepository);
 
         if (selectedValidators.isEmpty()) {
             System.out.println("No validators selected.");
@@ -346,5 +357,78 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         {
             throw new RuntimeException("Error assigning admin role to contract: " + contractAddress, e);
         }
+    }
+    
+    @Transactional
+    public void swapRoles(String account1, String account2) 
+    {
+        RoleToken contract = loadContract(RoleToken.class);
+        
+        try 
+        {
+            // Send the swap transaction
+            TransactionReceipt receipt = contract.swapRole(account1, account2).send();
+            
+            // Check transaction status
+            if (!receipt.isStatusOK()) 
+            {
+                throw new RuntimeException("Swap role transaction reverted");
+            }
+            
+            // Verify the swap occurred by checking events
+            List<RoleToken.RoleAssignedEventResponse> events = contract.getRoleAssignedEvents(receipt);
+            
+            if (events.size() != 2) {
+                throw new RuntimeException("Invalid number of RoleAssigned events emitted");
+            }
+
+            // Update database
+            updateLocalRoles(account1, account2);
+            
+        } 
+        catch (Exception e) 
+        {
+            handleSwapException(e, account1, account2);
+        }
+    }
+
+    private void updateLocalRoles(String account1, String account2) 
+    {
+        Peer peer1 = peerRepository.findByBcAddress(account1)
+            .orElseThrow(() -> new RuntimeException("Peer not found: " + account1));
+        
+        Peer peer2 = peerRepository.findByBcAddress(account2)
+            .orElseThrow(() -> new RuntimeException("Peer not found: " + account2));
+
+        // Swap roles
+        Role temp = peer1.getRole();
+        peer1.setRole(peer2.getRole());
+        peer2.setRole(temp);
+
+        peerRepository.saveAll(List.of(peer1, peer2));
+    }
+
+    private void handleSwapException(Exception e, String account1, String account2) 
+    {
+        String errorMessage = "Role swap failed between " + account1 + " and " + account2 + ": ";
+        
+        if (e instanceof TransactionException) 
+        {
+            errorMessage += "Blockchain transaction error - " + e.getMessage();
+        } 
+        else if (e instanceof IOException) 
+        {
+            errorMessage += "Network communication error";
+        } 
+        else 
+        {
+            errorMessage += "Unexpected error - " + e.getMessage();
+        }
+
+        // Log detailed error for debugging
+        System.err.println(errorMessage);
+        e.printStackTrace();
+
+        throw new RuntimeException(errorMessage, e);
     }
 }

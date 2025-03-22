@@ -165,8 +165,8 @@ public class AccessRequestService
         else 
         {
             resourcesPage = (search != null && !search.isEmpty()) 
-                ? resourceRepository.findByPeer_GroupWithSearch(currentPeer.getGroup(), search, pageable) 
-                : resourceRepository.findByPeer_Group(currentPeer.getGroup(), pageable);
+                ? resourceRepository.findByGroupWithSearchExcludingPeer(peerId, currentPeer.getGroup(), search, pageable) 
+                : resourceRepository.findByGroupExcludingPeer(peerId, currentPeer.getGroup(), pageable);
         }
 
         // Map each resource into a DTO.

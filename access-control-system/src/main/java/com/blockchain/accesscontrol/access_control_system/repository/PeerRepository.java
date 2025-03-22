@@ -24,4 +24,12 @@ public interface PeerRepository extends JpaRepository<Peer, Long>
     Optional<Peer> findByBcAddress(String address);
     
     Optional<Peer> findByUsername(String username);
+    
+    @Query("SELECT DISTINCT p.group FROM Peer p WHERE p.group IS NOT NULL")
+    List<String> findAllDistinctGroups();
+
+    List<Peer> findByGroupOrderByErc20TokenAmountDesc(String group);
+
+    @Query("SELECT p FROM Peer p WHERE p.group = ?1 AND p.role = ?2")
+    Peer findByGroupAndRole(String group, Role role);
 }

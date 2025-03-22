@@ -1,5 +1,6 @@
 package com.blockchain.accesscontrol.access_control_system.repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -15,4 +16,6 @@ public interface BehaviorHistoryRepository extends JpaRepository<BehaviorHistory
     List<BehaviorHistory> findAllByPeerOrderByStatusUpdateDesc(Peer peer);
 
     List<BehaviorHistory> findByPeerOrderByStatusUpdateAsc(Peer peer);
+    
+    List<BehaviorHistory> findByPeerAndStatusUpdateAfter(Peer peer, LocalDateTime cutoff);
 }
