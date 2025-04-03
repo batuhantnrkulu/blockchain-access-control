@@ -1,35 +1,55 @@
 package com.blockchain.accesscontrol.access_control_system.scheduler;
 
+import java.math.BigInteger;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import com.blockchain.accesscontrol.access_control_system.enums.Role;
 import com.blockchain.accesscontrol.access_control_system.model.Peer;
 import com.blockchain.accesscontrol.access_control_system.repository.PeerRepository;
 import com.blockchain.accesscontrol.access_control_system.service.RoleTokenService;
 
-@Service
-public class RoleSchedulerService {
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 
+@Service
+public class RoleSchedulerService 
+{
+	private static final Logger logger = LoggerFactory.getLogger(RoleSchedulerService.class);
+    
+    private final MeterRegistry meterRegistry;
     private final PeerRepository peerRepository;
     private final RoleTokenService roleTokenService;
 
-    public RoleSchedulerService(PeerRepository peerRepository, RoleTokenService roleTokenService) 
+    public RoleSchedulerService(PeerRepository peerRepository, RoleTokenService roleTokenService, MeterRegistry meterRegistry) 
     {
         this.peerRepository = peerRepository;
         this.roleTokenService = roleTokenService;
+        this.meterRegistry = meterRegistry;
     }
 
     @Scheduled(fixedRate = 300000) // Run every 5 minutes
     public void updateRolesBasedOnTokens() 
     {
-        List<String> groups = peerRepository.findAllDistinctGroups();
+    	Timer.Sample sample = Timer.start(meterRegistry);
         
-        for (String group : groups) 
-        {
-            updateGroupRoles(group);
+        try {
+            List<String> groups = peerRepository.findAllDistinctGroups();
+            meterRegistry.gauge("scheduler.groups.count", groups.size());
+            
+            groups.forEach(group -> {
+                updateGroupRoles(group);
+            });
+            
+            sample.stop(meterRegistry.timer("scheduler.execution.time"));
+        } catch (Exception e) {
+            meterRegistry.counter("scheduler.errors").increment();
+            logger.error("Scheduler failed", e);
         }
     }
 
@@ -53,13 +73,22 @@ public class RoleSchedulerService {
     {
         if (currentPrimary == null || !currentPrimary.getId().equals(expectedPrimary.getId())) 
         {
+        	Timer.Sample swapTimer = Timer.start(meterRegistry);
+        	
         	try 
         	{
-        	    roleTokenService.swapRoles(currentPrimary.getBcAddress(), expectedPrimary.getBcAddress());
+        		roleTokenService.swapRoles(currentPrimary.getBcAddress(), expectedPrimary.getBcAddress());
+                
+                // Record latency
+                swapTimer.stop(meterRegistry.timer("scheduler.swap.latency"));
+                
+                // Record successful swap
+                meterRegistry.counter("scheduler.swaps", "type", "primary").increment();
         	} 
         	catch (RuntimeException ex) 
         	{
-        	    System.out.println(ex);
+        		meterRegistry.counter("scheduler.swap.errors", "type", "primary").increment();
+                logger.error("Primary role swap failed", ex);
         	}
         }
     }
@@ -68,13 +97,22 @@ public class RoleSchedulerService {
     {
         if (currentSecondary == null || !currentSecondary.getId().equals(expectedSecondary.getId())) 
         {
+        	Timer.Sample swapTimer = Timer.start(meterRegistry);
+        	
         	try 
         	{
         	    roleTokenService.swapRoles(currentSecondary.getBcAddress(), expectedSecondary.getBcAddress());
+        	    
+        	    // Record latency
+                swapTimer.stop(meterRegistry.timer("scheduler.swap.latency"));
+                
+                // Record successful swap
+                meterRegistry.counter("scheduler.swaps", "type", "secondary").increment();
         	} 
         	catch (RuntimeException ex) 
         	{
-        	    System.out.println(ex);
+        		meterRegistry.counter("scheduler.swap.errors", "type", "secondary").increment();
+                logger.error("Primary role swap failed", ex);
         	}
         }
     }

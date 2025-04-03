@@ -55,7 +55,7 @@ public class ConsensusUtil
         return selectValidators(selected, weightedList, count);
     }
 
-    private double calculateHistoricBehaviorScore(Peer peer) 
+    public double calculateHistoricBehaviorScore(Peer peer) 
     {
         int total = peer.getRewardCounter() + peer.getMisbehaviorCounter();
         return total > 0 ? 
@@ -63,7 +63,7 @@ public class ConsensusUtil
             0.5;
     }
 
-    private Map<Peer, Double> calculateRecentBehaviorScores(List<Peer> peers, BehaviorHistoryRepository repo) 
+    public Map<Peer, Double> calculateRecentBehaviorScores(List<Peer> peers, BehaviorHistoryRepository repo) 
     {
         Map<Peer, Double> scores = new HashMap<>();
         LocalDateTime cutoff = LocalDateTime.now().minusDays(RECENT_DAYS);
@@ -83,6 +83,22 @@ public class ConsensusUtil
         }
         
         return scores;
+    }
+    
+    public double calculateRecentBehaviorScore(Peer peer, BehaviorHistoryRepository repo) 
+    {
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(RECENT_DAYS);
+        
+        List<BehaviorHistory> recentBehaviors = repo.findByPeerAndStatusUpdateAfter(peer, cutoff);
+        
+        long positiveCount = recentBehaviors.stream()
+            .filter(BehaviorHistory::isPositive)
+            .count();
+        
+        double score = recentBehaviors.isEmpty() ? 
+            0.5 : (double) positiveCount / recentBehaviors.size();
+        
+        return score;
     }
 
     // Existing helper methods remain unchanged

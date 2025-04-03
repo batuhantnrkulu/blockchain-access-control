@@ -41,6 +41,13 @@ public class PeerService
         }
         
         peer.setBcStatus(statusEnum);
+        
+        if (peer.getBcStatus() != statusEnum)
+        {
+        	peer.setBcLastStatusUpdate(LocalDateTime.now());
+        }
+        
+        peer.setMisbehaviorCounter(peer.getMisbehaviorCounter() + 1);
         peerRepository.save(peer);
 
         BehaviorHistory history = new BehaviorHistory();
@@ -49,6 +56,7 @@ public class PeerService
         history.setTokenAmountChange(-penaltyAmount.longValue()); // Negative value for deduction
         history.setReason(reason);
         history.setStatusUpdate(LocalDateTime.now());
+        history.setPositive(false);
 
         behaviorHistoryService.addHistory(history);
     }
@@ -70,17 +78,33 @@ public class PeerService
                 throw new RuntimeException("Invalid status: " + newStatus);
             }
             
-            peer.setBcStatus(statusEnum);	
+            if (peer.getBcStatus() != statusEnum)
+            {
+            	peer.setBcLastStatusUpdate(LocalDateTime.now());
+            }
+            
+            peer.setBcStatus(statusEnum);
         }
-        
+
+        peer.setRewardCounter(peer.getRewardCounter() + 1);
         peerRepository.save(peer);
 
         BehaviorHistory history = new BehaviorHistory();
         history.setPeer(peer);
         history.setTokenAmount(newBalance);
         history.setTokenAmountChange(rewardAmount.longValue());
-        history.setReason(reason);
+        
+        if (rewardAmount.longValue() != 0L)
+        {
+        	history.setReason(reason);
+        }
+        else
+        {
+        	history.setReason(reason + " - Recovery");
+        }
+        
         history.setStatusUpdate(LocalDateTime.now());
+        history.setPositive(true);
 
         behaviorHistoryService.addHistory(history);
     }

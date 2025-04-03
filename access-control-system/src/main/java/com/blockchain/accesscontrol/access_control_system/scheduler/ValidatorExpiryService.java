@@ -144,6 +144,7 @@ public class ValidatorExpiryService
 		        history.setTokenAmountChange(1000L); // Save the deduction amount
 		        history.setReason("Responsed on time as Validator");
 		        history.setStatusUpdate(now);
+		        history.setPositive(true);
 		        behaviorHistoryService.addHistory(history);
 
 		        // Send notification
@@ -182,6 +183,7 @@ public class ValidatorExpiryService
 		        history.setTokenAmountChange(-1000L); // Save the deduction amount
 		        history.setReason("Validator did not respond in time");
 		        history.setStatusUpdate(now);
+		        history.setPositive(false);
 		        behaviorHistoryService.addHistory(history);
 
 		        // Send notification

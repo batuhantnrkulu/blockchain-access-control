@@ -17,4 +17,6 @@ public class MemberDTO
 	private LocalDateTime lastStatusUpdate;
 	private Role role;
 	private String blockingEndTime;
+	private Boolean isWebUser;
+	private String ipAddress;
 }

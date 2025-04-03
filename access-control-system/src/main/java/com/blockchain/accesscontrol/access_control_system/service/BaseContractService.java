@@ -6,8 +6,8 @@ import java.lang.reflect.Method;
 import org.web3j.protocol.Web3j;
 import org.web3j.tx.TransactionManager;
 import org.web3j.tx.gas.ContractGasProvider;
-import org.web3j.tx.gas.DefaultGasProvider;
 
+import com.blockchain.accesscontrol.access_control_system.config.CustomGasProvider;
 import com.blockchain.accesscontrol.access_control_system.config.TransactionManagerFactory;
 
 public abstract class BaseContractService<T>  
@@ -25,7 +25,7 @@ public abstract class BaseContractService<T>
 	
 	protected T loadContract(Class<T> contractClass, String contractAddress, String privateKey) 
 	{
-        TransactionManager txManager = transactionManagerFactory.createTransactionManager(privateKey);
+		 TransactionManager txManager = transactionManagerFactory.createCustomTransactionManager(privateKey);
 
         try {
             // Use contractClass.getMethod("load", ...) to dynamically invoke the load method
@@ -33,7 +33,7 @@ public abstract class BaseContractService<T>
 
             // Invoke the `load` method and cast it to T
             return contractClass.cast(
-                loadMethod.invoke(null, contractAddress, web3j, txManager, new DefaultGasProvider())
+                loadMethod.invoke(null, contractAddress, web3j, txManager, new CustomGasProvider())
             );
 
         } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
@@ -43,7 +43,7 @@ public abstract class BaseContractService<T>
 	
 	protected T loadContract(Class<T> contractClass, String privateKey) 
 	{
-        TransactionManager txManager = transactionManagerFactory.createTransactionManager(privateKey);
+		 TransactionManager txManager = transactionManagerFactory.createCustomTransactionManager(privateKey);
 
         try {
             // Use contractClass.getMethod("load", ...) to dynamically invoke the load method
@@ -51,7 +51,7 @@ public abstract class BaseContractService<T>
 
             // Invoke the `load` method and cast it to T
             return contractClass.cast(
-                loadMethod.invoke(null, contractAddress, web3j, txManager, new DefaultGasProvider())
+                loadMethod.invoke(null, contractAddress, web3j, txManager, new CustomGasProvider())
             );
 
         } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
@@ -68,7 +68,7 @@ public abstract class BaseContractService<T>
 
             // Invoke the `load` method and cast it to T
             return contractClass.cast(
-                loadMethod.invoke(null, contractAddress, web3j, txManager, new DefaultGasProvider())
+                loadMethod.invoke(null, contractAddress, web3j, txManager, new CustomGasProvider())
             );
 
         } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {

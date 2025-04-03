@@ -5,6 +5,8 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.web3j.protocol.Web3j;
+import org.web3j.protocol.core.DefaultBlockParameterName;
+import org.web3j.protocol.core.methods.response.EthGetBalance;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import com.blockchain.accesscontrol.access_control_system.config.TransactionManagerFactory;
@@ -41,9 +43,13 @@ public class AccessControlService extends BaseContractService<AccessControlFacto
         
         // Load the AccessControlFactory contract using the object peer's credentials.
         AccessControlFactory accessControlFactory = loadContract(AccessControlFactory.class, objectPrivateKey);
+        System.out.println("test: " + objectPrivateKey);
         
         try 
         {
+        	EthGetBalance balance = web3j.ethGetBalance(objectAddress, DefaultBlockParameterName.LATEST).send();
+        	System.out.println("Object balance: " + balance.getBalance());
+        	
             // Deploy the ACC contract.
             TransactionReceipt receipt = accessControlFactory.deployAccessControlContract(objectAddress, subjectAddress, accType).send();
             

@@ -3,8 +3,15 @@ package com.blockchain.accesscontrol.access_control_system.service;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -35,6 +42,8 @@ import com.blockchain.accesscontrol.access_control_system.utils.ConsensusUtil;
 import com.blockchain.accesscontrol.access_control_system.utils.EncryptionUtil;
 import com.blockchain.accesscontrol.access_control_system.utils.RoleUtils;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.transaction.Transactional;
 
 @Service
@@ -50,6 +59,9 @@ public class RoleTokenService extends BaseContractService<RoleToken>
     private final UnjoinedPeerMapper unjoinedPeerMapper;
     private final BehaviorHistoryRepository behaviorHistoryRepository;
     private final ConsensusUtil consensusUtil;
+    private final MeterRegistry meterRegistry;
+    private final ConsensusBenchmarkService consensusBenchmarkService;
+    private final BehaviorSimulationService simulationService;
     
     // Inject the WebSocket messaging template
     private final SimpMessagingTemplate messagingTemplate;
@@ -59,7 +71,8 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 			PeerRepository peerRepository, ValidatorListRepository validatorListRepository,
 			UnjoinedPeerRepository unjoinedPeerRepository, EncryptionUtil encryptionUtil, PasswordEncoder passwordEncoder,
 			SimpMessagingTemplate messagingTemplate, NotificationService notificationService, UnjoinedPeerMapper unjoinedPeerMapper,
-			BehaviorHistoryRepository behaviorHistoryRepository, ConsensusUtil consensusUtil) 
+			BehaviorHistoryRepository behaviorHistoryRepository, ConsensusUtil consensusUtil, MeterRegistry meterRegistry, 
+			ConsensusBenchmarkService consensusBenchmarkService, BehaviorSimulationService simulationService) 
 	{
 		super(web3j, transactionManagerFactory, contractAddress);
 		this.memberMapper = memberMapper;
@@ -73,6 +86,71 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 		this.unjoinedPeerMapper = unjoinedPeerMapper;
 		this.behaviorHistoryRepository = behaviorHistoryRepository;
 		this.consensusUtil = consensusUtil;
+		this.meterRegistry = meterRegistry;
+		this.consensusBenchmarkService = consensusBenchmarkService;
+		this.simulationService = simulationService;
+	}
+	
+	public Map<String, Object> bulkAssignRoles(List<PeerRegistrationRequest> requests, boolean async) 
+	{
+	    AtomicInteger successCount = new AtomicInteger();
+	    AtomicInteger failureCount = new AtomicInteger();
+	    List<Map<String, String>> details = Collections.synchronizedList(new ArrayList<>());
+
+	    // Record metrics
+	    Timer.Sample timer = Timer.start(meterRegistry);
+	    
+	    ExecutorService executor = async ? 
+	        Executors.newFixedThreadPool(10) : 
+	        Executors.newSingleThreadExecutor();
+
+	    requests.forEach(request -> {
+	        executor.execute(() -> {
+	            try {
+	                String result = "";
+	                this.assignDirectly(request); // change to assign if you want to run validators
+	                successCount.incrementAndGet();
+	                details.add(Map.of(
+	                    "address", request.getBlockchainAddress(),
+	                    "status", "success",
+	                    "message", result
+	                ));
+	            } catch (Exception e) {
+	                failureCount.incrementAndGet();
+	                details.add(Map.of(
+	                    "address", request.getBlockchainAddress(),
+	                    "status", "error",
+	                    "message", e.getMessage()
+	                ));
+	                meterRegistry.counter("role.bulk.assign.errors").increment();
+	            }
+	        });
+	    });
+
+	    executor.shutdown();
+	    try {
+	        executor.awaitTermination(1, TimeUnit.HOURS);
+	    } catch (InterruptedException e) {
+	        Thread.currentThread().interrupt();
+	    }
+
+	    // simulating behaviors
+	    List<Peer> peers = peerRepository.findAll();
+	    for (Peer peer : peers)
+	    	simulationService.simulatePeerBehaviors(peer);
+	    
+	    // Record metrics
+	    timer.stop(meterRegistry.timer("role.bulk.assign.time"));
+	    meterRegistry.counter("role.bulk.assign.total").increment(requests.size());
+	    meterRegistry.gauge("role.bulk.assign.success", successCount);
+	    meterRegistry.gauge("role.bulk.assign.failures", failureCount);
+
+	    return Map.of(
+	        "total", requests.size(),
+	        "success", successCount.get(),
+	        "failures", failureCount.get(),
+	        "details", details
+	    );
 	}
 	
 	@Transactional
@@ -94,25 +172,27 @@ public class RoleTokenService extends BaseContractService<RoleToken>
     }
 
 	private int calculateRequiredValidators(long primaryHeadCount) 
-	{
-	    if (primaryHeadCount < 4) 
-	    	return 0;
-	    
-	    // Inspired by OmniLedger's committee scaling (logarithmic) and 
-	    // Algorand's committee size analysis (square root)
-	    double logFactor = Math.log(primaryHeadCount + 1); // Natural logarithm
-	    double sqrtFactor = Math.sqrt(primaryHeadCount);
-	    
-	    // Hybrid approach combining both log and sqrt terms
-	    int validators = (int) Math.ceil(3.0 * logFactor + 0.5 * sqrtFactor);
+	{   
+		if (primaryHeadCount < 4)
+			return 0;
+		
+		int k = 1; // fast growth 2 -> moderate 10 -> slow
+	    int validators = 3 * (int) Math.floor((primaryHeadCount / k - 1) / 2);
 	    
 	    // Ensure minimum of 4 validators for BFT safety (Castro and Liskov, 2002)
 	    validators = Math.max(validators, 4);
 	    
+	    // Confidence factor calculation (1-100 scale)
+	    double confidence = Math.min(100, 20 * Math.log(primaryHeadCount));
+	    
+	    // Record confidence metric
+	    meterRegistry.gauge("consensus.confidence", confidence);
+	    meterRegistry.gauge("consensus.validators.required", validators);
+	    
 	    return Math.min(validators, (int) primaryHeadCount);
 	}
 
-    public void assignDirectly(PeerRegistrationRequest peerRegistrationRequest) 
+    public Peer assignDirectly(PeerRegistrationRequest peerRegistrationRequest) 
     {
     	RoleToken contract = loadContract(RoleToken.class);
 		
@@ -160,6 +240,8 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 	                newPeer.setErc20TokenAmount(tokenAmount);
 
 	                peerRepository.save(newPeer);
+	                
+	                return newPeer;
 	            }
 	            
 	        } else {
@@ -168,6 +250,8 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 	    } catch (Exception e) {
 	        e.printStackTrace();
 	    }
+		
+		return null;
     }
 
     @Transactional
@@ -201,8 +285,16 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         unjoinedPeer.setValidatorCount(count);
         unjoinedPeer = unjoinedPeerRepository.save(unjoinedPeer);
 
+        Timer.Sample timer = Timer.start(meterRegistry);
         List<Peer> selectedValidators = consensusUtil.selectWeightedRandom(primaryHeads, count, behaviorHistoryRepository);
-
+        timer.stop(meterRegistry.timer("consensus.selection.time"));
+        
+        // Calculate Gini metrics
+        Map<String, Double> giniMetrics = consensusBenchmarkService.calculateAllGinis(selectedValidators);
+        
+        giniMetrics.forEach((k,v) -> 
+            meterRegistry.gauge("consensus.gini.current."+k, v));
+        
         if (selectedValidators.isEmpty()) {
             System.out.println("No validators selected.");
             return;
@@ -266,6 +358,7 @@ public class RoleTokenService extends BaseContractService<RoleToken>
                 long currentBalance = peer.getErc20TokenAmount();
                 long newBalance = currentBalance - penaltyAmount;
                 peer.setErc20TokenAmount(newBalance);
+                peer.setMisbehaviorCounter(peer.getMisbehaviorCounter() + 1);
                 peerRepository.save(peer);
                 
                 return newBalance;
@@ -308,6 +401,7 @@ public class RoleTokenService extends BaseContractService<RoleToken>
                 long currentBalance = peer.getErc20TokenAmount();
                 long newBalance = currentBalance + rewardAmount;
                 peer.setErc20TokenAmount(newBalance);
+                peer.setRewardCounter(peer.getRewardCounter() + 1);
                 peerRepository.save(peer);
                 
                 return newBalance;
@@ -368,6 +462,10 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         {
             // Send the swap transaction
             TransactionReceipt receipt = contract.swapRole(account1, account2).send();
+            
+            // Record gas metrics
+            BigInteger gasUsed = receipt.getGasUsed();
+            meterRegistry.summary("scheduler.gas.used").record(gasUsed.doubleValue());
             
             // Check transaction status
             if (!receipt.isStatusOK()) 
@@ -430,5 +528,18 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         e.printStackTrace();
 
         throw new RuntimeException(errorMessage, e);
+    }
+    
+    public MemberDTO getMember(String memberAddress) 
+	{
+        RoleToken contract = loadContract(RoleToken.class);
+
+        try {
+            RoleToken.Member memberStruct = contract.getMember(memberAddress).send();
+            return memberMapper.toMemberDTO(memberStruct);  // Use MapStruct for mapping
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw new RuntimeException("Failed to fetch member details.", e);
+        }
     }
 }
