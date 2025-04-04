@@ -176,11 +176,15 @@ public class RoleTokenService extends BaseContractService<RoleToken>
 		if (primaryHeadCount < 4)
 			return 0;
 		
-		int k = 1; // fast growth 2 -> moderate 10 -> slow
-	    int validators = 3 * (int) Math.floor((primaryHeadCount / k - 1) / 2);
+		int k = 2; // 1 -> fast growth 2 -> moderate 10 -> slow
+		
+		int maxF = (int) Math.floor((primaryHeadCount - 1) / 2);
+	    int f = (int) Math.floor((primaryHeadCount / k - 1) / 2);
+	    
+	    f = Math.min(maxF, f);
 	    
 	    // Ensure minimum of 4 validators for BFT safety (Castro and Liskov, 2002)
-	    validators = Math.max(validators, 4);
+	    int validators = 3 * f + 1;
 	    
 	    // Confidence factor calculation (1-100 scale)
 	    double confidence = Math.min(100, 20 * Math.log(primaryHeadCount));
@@ -259,6 +263,10 @@ public class RoleTokenService extends BaseContractService<RoleToken>
     {
         List<Peer> primaryHeads = peerRepository.findAllByRoleAndStatus(Role.PRIMARY_GROUP_HEAD, Status.BENIGN);
 
+        // Calculate Gini metrics
+        System.out.println("number of primary heads with benign status:" + primaryHeads.size());
+        consensusBenchmarkService.runComparisonBenchmark(primaryHeads, count);
+        
         if (primaryHeads.isEmpty()) {
             System.out.println("No primary heads available. Cannot assign validators.");
             return;
@@ -288,12 +296,6 @@ public class RoleTokenService extends BaseContractService<RoleToken>
         Timer.Sample timer = Timer.start(meterRegistry);
         List<Peer> selectedValidators = consensusUtil.selectWeightedRandom(primaryHeads, count, behaviorHistoryRepository);
         timer.stop(meterRegistry.timer("consensus.selection.time"));
-        
-        // Calculate Gini metrics
-        Map<String, Double> giniMetrics = consensusBenchmarkService.calculateAllGinis(selectedValidators);
-        
-        giniMetrics.forEach((k,v) -> 
-            meterRegistry.gauge("consensus.gini.current."+k, v));
         
         if (selectedValidators.isEmpty()) {
             System.out.println("No validators selected.");
