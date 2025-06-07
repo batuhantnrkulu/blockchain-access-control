@@ -1,0 +1,197 @@
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#include <Adafruit_SSD1306.h>
+#include <DHT.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define DHTPIN 4
+#define DHTTYPE DHT11
+
+const int ledPin = 2;
+const int approvePin = 13;
+const int rejectPin = 12;
+
+const char* ssid = "Resident Cape Trail";
+const char* password = "hat297witty";
+
+WiFiUDP udp;
+unsigned int localPort = 3333;
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+DHT dht(DHTPIN, DHTTYPE);
+
+String lastCommand = "Ready";
+unsigned long lastBlink = 0;
+bool ledState = false;
+bool showIP = true;
+unsigned long lastButtonPress = 0;
+
+String qtIP = "";
+bool blinkActive = false;
+int blinkCount = 0;
+bool waitingForApproval = false;
+bool isCalculating = false;
+unsigned long lastSensorSent = 0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(ledPin, OUTPUT);
+  pinMode(approvePin, INPUT_PULLUP);
+  pinMode(rejectPin, INPUT_PULLUP);
+
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  display.clearDisplay();
+
+  dht.begin();
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    updateDisplay("Connecting...", "");
+  }
+
+  udp.begin(localPort);
+  updateDisplay("IP Address:", WiFi.localIP().toString());
+}
+
+void loop() {
+  handleButtons();
+  handleLED();
+  handleUDP();
+
+  if (!waitingForApproval) {
+    updateSensorData();
+  }
+
+  if (isCalculating && millis() - lastSensorSent >= 4000) {
+    sendSensorData();
+    lastSensorSent = millis();
+  }
+
+  delay(10);
+}
+
+void handleButtons() {
+  static bool lastApproveState = HIGH;
+  static bool lastRejectState = HIGH;
+  static unsigned long lastDebounce = 0;
+
+  bool currentApprove = digitalRead(approvePin);
+  bool currentReject = digitalRead(rejectPin);
+
+  if (waitingForApproval && !qtIP.isEmpty()) {
+    if (currentApprove == LOW && lastApproveState == HIGH && millis() - lastDebounce > 50) {
+      Serial.println("Approve button pressed!");
+      sendUDP("APPROVE");
+      lastCommand = "Approved!";
+      waitingForApproval = false;
+      blinkActive = false;
+      digitalWrite(ledPin, LOW);
+      lastDebounce = millis();
+    }
+
+    if (currentReject == LOW && lastRejectState == HIGH && millis() - lastDebounce > 50) {
+      Serial.println("Reject button pressed!");
+      sendUDP("REJECT");
+      lastCommand = "Rejected!";
+      waitingForApproval = false;
+      blinkActive = false;
+      digitalWrite(ledPin, LOW);
+      lastDebounce = millis();
+    }
+  }
+
+  lastApproveState = currentApprove;
+  lastRejectState = currentReject;
+}
+
+void handleLED() {
+  if (blinkActive && blinkCount < 10) {
+    if (millis() - lastBlink >= 250) {
+      digitalWrite(ledPin, !digitalRead(ledPin));
+      lastBlink = millis();
+      blinkCount++;
+    }
+  } else {
+    blinkActive = false;
+    digitalWrite(ledPin, LOW);
+  }
+}
+
+void handleUDP() {
+  int packetSize = udp.parsePacket();
+  if (packetSize) {
+    char packet[255];
+    int len = udp.read(packet, 255);
+    if (len > 0) packet[len] = 0;
+
+    String command = String(packet);
+    command.trim();
+
+    if (command == "REGISTER_REQUEST") {
+      qtIP = udp.remoteIP().toString();
+      Serial.println("Qt IP Stored: " + qtIP);
+      updateDisplay("Qt Request", "Approve/Reject");
+      blinkActive = true;
+      blinkCount = 0;
+      waitingForApproval = true;
+    } else if (command == "START_CALCULATE") {
+      isCalculating = true;
+      Serial.println("Calculation started");
+    } else if (command == "STOP_CALCULATE") {
+      isCalculating = false;
+      Serial.println("Calculation stopped");
+    }
+  }
+}
+
+void updateSensorData() {
+  static unsigned long lastUpdate = 0;
+  if (millis() - lastUpdate > 2000) {
+    float temp = dht.readTemperature();
+    float hum = dht.readHumidity();
+
+    String statusLine = "Status: " + lastCommand;
+    String sensorLine = "Temp: " + String(temp) + "C Hum:" + String(hum) + "%";
+    String ipLine = "IP: " + WiFi.localIP().toString();
+
+    updateDisplay(statusLine, sensorLine, ipLine);
+    lastUpdate = millis();
+  }
+}
+
+void sendSensorData() {
+  float temp = dht.readTemperature();
+  float hum = dht.readHumidity();
+
+  // Check if readings are valid
+  if (isnan(temp) || isnan(hum)) {
+    Serial.println("Failed to read from DHT sensor!");
+    return;
+  }
+
+  // Create a fresh string each time with newline termination
+  String data = String(temp, 1) + "," + String(hum, 1) + "\n";
+  sendUDP(data);
+}
+
+void sendUDP(String message) {
+  udp.beginPacket(qtIP.c_str(), 3333);
+  udp.print(message);
+  udp.endPacket();
+}
+
+void updateDisplay(String line1, String line2) {
+    updateDisplay(line1, line2, "");  // Call three-parameter version with empty third line
+}
+
+void updateDisplay(String line1, String line2, String line3) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0); display.print(line1);
+  display.setCursor(0, 20); display.print(line2);
+  display.setCursor(0, 40); display.print(line3);
+  display.display();
+}
