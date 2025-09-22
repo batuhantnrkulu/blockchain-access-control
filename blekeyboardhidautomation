@@ -1,6 +1,7 @@
 /*
 DISCLAIMER: Only use for Educational Purposes
   ESP32 BLE HID keyboard + OLED status (Hardened timings + fixes)
+- Install all needed libraries separately
   - Fixes: ensure modifiers released, slower typing, safer file creation
   - Requirements: ESP32 BLE Keyboard (T-vK), Adafruit SSD1306, Adafruit GFX
   - Behavior: advertise as BLE HID; on BLE connect + button press (3s countdown)
